@@ -1,0 +1,103 @@
+# Icon configuration for CustomNode
+# Maps type keywords to Lucide icons and CSS classes
+
+mappings:
+  - keywords: ["image", "cv::mat"]
+    icon: "Image"
+    className: "text-blue-500 dark:text-blue-400"
+  
+  - keywords: ["cloud", "mesh", "pcd", "livox"]
+    icon: "Box"
+    className: "text-emerald-500 dark:text-emerald-400"
+  
+  - keywords: ["imu"]
+    icon: "Compass"
+    className: "text-red-500 dark:text-red-400"
+  
+  - keywords: ["odom", "odometry"]
+    icon: "Map"
+    className: "text-yellow-500 dark:text-yellow-400"
+  
+  - keywords: ["transform", "tf", "pose"]
+    icon: "Move3d"
+    className: "text-purple-500 dark:text-purple-400"
+  
+  - keywords: ["path"]
+    icon: "Activity"
+    className: "text-cyan-500 dark:text-cyan-400"
+  
+  - keywords: ["perception", "det"]
+    icon: "Scan"
+    className: "text-rose-500 dark:text-rose-400"
+    
+  - keywords: ["grid", "occupancy"]
+    icon: "Grid"
+    className: "text-lime-500 dark:text-lime-400"
+    
+  - keywords: ["twist", "velocity", "cmd_vel"]
+    icon: "Wind"
+    className: "text-sky-500 dark:text-sky-400"
+
+  - keywords: ["scan", "laser", "ray_cast"]
+    icon: "Radar"
+    className: "text-red-500 dark:text-red-400"
+
+  - keywords: ["gps", "gnss", "fix", "latlon"]
+    icon: "Satellite"
+    className: "text-sky-600 dark:text-sky-400"
+
+  - keywords: ["battery", "power", "voltage", "charge"]
+    icon: "Zap"
+    className: "text-amber-500 dark:text-amber-400"
+
+  - keywords: ["info", "calibration", "intrinsic"]
+    icon: "Aperture"
+    className: "text-blue-400 dark:text-blue-300"
+
+  - keywords: ["audio", "speech", "voice", "sound"]
+    icon: "Mic"
+    className: "text-violet-500 dark:text-violet-400"
+
+  - keywords: ["joint", "link", "motor", "servo"]
+    icon: "Link"
+    className: "text-zinc-500 dark:text-zinc-400"
+
+  - keywords: ["goal", "target", "destination"]
+    icon: "Target"
+    className: "text-rose-600 dark:text-rose-400"
+
+  - keywords: ["time", "duration", "clock", "timestamp"]
+    icon: "Clock"
+    className: "text-slate-500 dark:text-slate-400"
+
+  - keywords: ["diag", "status", "health", "monitor"]
+    icon: "Activity"
+    className: "text-green-500 dark:text-green-400"
+
+  - keywords: ["bytes", "blob", "raw", "stream"]
+    icon: "Binary"
+    className: "text-slate-500 dark:text-slate-400"
+    
+  - keywords: ["param", "config", "setting"]
+    icon: "Sliders"
+    className: "text-gray-500 dark:text-gray-400"
+    
+  - keywords: ["marker"]
+    icon: "BoxSelect"
+    className: "text-indigo-500 dark:text-indigo-400"
+    
+  - keywords: ["bool"]
+    icon: "ToggleLeft"
+    className: "text-pink-500 dark:text-pink-400"
+    
+  - keywords: ["string"]
+    icon: "Quote"
+    className: "text-slate-400"
+    
+  - keywords: ["int", "double", "float"]
+    icon: "Hash"
+    className: "text-orange-500 dark:text-orange-400"
+
+default:
+  icon: "Type"
+  className: "text-slate-400"

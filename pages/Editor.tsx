@@ -1,0 +1,1222 @@
+
+import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
+import { 
+  ReactFlow, 
+  Controls, 
+  Background, 
+  useNodesState, 
+  useEdgesState, 
+  addEdge, 
+  Connection, 
+  Edge, 
+  Node,
+  BackgroundVariant,
+  Panel,
+  ReactFlowProvider,
+  useReactFlow
+} from '@xyflow/react';
+
+import { useSystem, useAgentMetrics } from '../context/SystemContext';
+import { CustomNode } from '../components/CustomNode';
+import { CustomEdge } from '../components/CustomEdge';
+import { AgentStatus, Dataflow, AgentCapabilities, Capability } from '../types';
+import { INITIAL_CAPABILITIES } from '../services/mockData';
+import { packageService } from '../services/packageService';
+import { Loader2 } from 'lucide-react';
+import { useNavigate, useBeforeUnload } from 'react-router-dom';
+import dagre from 'dagre';
+import { dataflowToReactFlow, reactFlowToDataflow, normalizeDataflow, getMatchScore } from '../utils/dataflowUtils';
+
+// Sub-components
+import { EditorSidebar } from '../components/editor/EditorSidebar';
+import { EditorToolbar } from '../components/editor/EditorToolbar';
+import { EditorSearch } from '../components/editor/EditorSearch';
+import { PerformanceOverlay } from '../components/editor/PerformanceOverlay';
+import { EdgeContextMenu } from '../components/editor/EdgeContextMenu';
+import { ViewportOverlay } from '../components/editor/ViewportOverlay';
+
+// Hooks
+import { useEditorHistory } from '../hooks/useEditorHistory';
+import { useEditorShortcuts } from '../hooks/useEditorShortcuts';
+
+const nodeTypes = {
+  custom: CustomNode,
+};
+
+const edgeTypes = {
+  default: CustomEdge,
+};
+
+const EditorContent: React.FC = () => {
+  const { 
+    agents, 
+    activeDataflow, 
+    saveDataflow, 
+    deployDataflowToAgent, 
+    setAgentState, 
+    theme, 
+    setSidebarCollapsed,
+    editorSelectedAgentId,
+    setEditorSelectedAgentId,
+    clearAgentMetrics,
+    addNotification,
+    localCapabilities,
+    getAgentClearTimestamp,
+    compilationState,
+    updateCompilationState
+  } = useSystem();
+  
+  const navigate = useNavigate();
+  const { screenToFlowPosition, getNode, fitView, getNodes, getEdges } = useReactFlow();
+  
+  const [nodes, setNodes, onNodesChange] = useNodesState([]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+  
+  const [config, setConfig] = useState({ name: '', description: '' });
+  const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({});
+  const [sidebarKey, setSidebarKey] = useState(0);
+  const [pendingStatus, setPendingStatus] = useState<string | null>(null);
+  
+  const [highlightedNodeId, setHighlightedNodeId] = useState<string | null>(null);
+
+  useEffect(() => {
+      if (!editorSelectedAgentId && agents.length > 0) {
+          setEditorSelectedAgentId(agents[0].id);
+      }
+  }, [agents, editorSelectedAgentId, setEditorSelectedAgentId]);
+
+  const realtimeAgent = useAgentMetrics(editorSelectedAgentId);
+
+  useEffect(() => {
+      setSidebarCollapsed(true);
+  }, [setSidebarCollapsed]);
+
+  const [isDirty, setIsDirty] = useState(false);
+  const [originalDataflow, setOriginalDataflow] = useState<Dataflow | null>(null);
+  const [autoSavedDataflow, setAutoSavedDataflow] = useState<Dataflow | null>(null);
+
+  const [showSearch, setShowSearch] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchFlowPosition, setSearchFlowPosition] = useState({ x: 0, y: 0 });
+  const mousePositionRef = useRef({ x: 0, y: 0 });
+  const searchRef = useRef<HTMLDivElement>(null);
+
+  const [edgeContextMenu, setEdgeContextMenu] = useState<{
+    visible: boolean;
+    x: number;
+    y: number;
+    edgeId: string | null;
+  }>({ visible: false, x: 0, y: 0, edgeId: null });
+
+  const showToast = useCallback((message: string, type: 'success' | 'error' | 'info' = 'info') => {
+      addNotification({ message, type });
+  }, [addNotification]);
+
+  // --- Core Node Handlers ---
+  const handleParameterChange = useCallback((nodeId: string, key: string, value: any) => {
+    setNodes((nds) =>
+      nds.map((node) => {
+        if (node.id === nodeId) {
+          const currentParams = (node.data.currentParameterValues as any) || {};
+          return {
+            ...node,
+            data: {
+              ...node.data,
+              currentParameterValues: { ...currentParams, [key]: value },
+            },
+          };
+        }
+        return node;
+      })
+    );
+  }, [setNodes]);
+
+  const handleClientChange = useCallback((nodeId: string, serviceName: string, topic: string) => {
+    setNodes((nds) =>
+      nds.map((node) => {
+        if (node.id === nodeId) {
+          const clients = (node.data.clients as any[]) || [];
+          const newClients = clients.map(c => 
+              c.name === serviceName ? { ...c, topic } : c
+          );
+          return {
+            ...node,
+            data: {
+              ...node.data,
+              clients: newClients,
+            },
+          };
+        }
+        return node;
+      })
+    );
+  }, [setNodes]);
+
+  const handleServerChange = useCallback((nodeId: string, serviceName: string, topic: string) => {
+    setNodes((nds) =>
+      nds.map((node) => {
+        if (node.id === nodeId) {
+          const servers = (node.data.servers as any[]) || [];
+          const newServers = servers.map(s => 
+              s.name === serviceName ? { ...s, topic } : s
+          );
+          return {
+            ...node,
+            data: {
+              ...node.data,
+              servers: newServers,
+            },
+          };
+        }
+        return node;
+      })
+    );
+  }, [setNodes]);
+
+  const handleActorChange = useCallback((nodeId: string, actionName: string, topic: string) => {
+    setNodes((nds) =>
+      nds.map((node) => {
+        if (node.id === nodeId) {
+          const actors = (node.data.actors as any[]) || [];
+          const newActors = actors.map(a => 
+              a.name === actionName ? { ...a, topic } : a
+          );
+          return {
+            ...node,
+            data: {
+              ...node.data,
+              actors: newActors,
+            },
+          };
+        }
+        return node;
+      })
+    );
+  }, [setNodes]);
+
+  const handleCommanderChange = useCallback((nodeId: string, actionName: string, topic: string) => {
+    setNodes((nds) =>
+      nds.map((node) => {
+        if (node.id === nodeId) {
+          const commanders = (node.data.commanders as any[]) || [];
+          const newCommanders = commanders.map(c => 
+              c.name === actionName ? { ...c, topic } : c
+          );
+          return {
+            ...node,
+            data: {
+              ...node.data,
+              commanders: newCommanders,
+            },
+          };
+        }
+        return node;
+      })
+    );
+  }, [setNodes]);
+
+  const handleIdChange = useCallback((nodeId: string, newId: string) => {
+      setNodes((nds) => 
+        nds.map((node) => {
+            if (node.id === nodeId) {
+                return {
+                    ...node,
+                    data: { ...node.data, user_id: newId }
+                };
+            }
+            return node;
+        })
+      );
+  }, [setNodes]);
+
+  const handleCollapseChange = useCallback((nodeId: string, collapsed: boolean) => {
+      setNodes((nds) => 
+        nds.map((node) => {
+            if (node.id === nodeId) {
+                return {
+                    ...node,
+                    data: { ...node.data, collapsed }
+                };
+            }
+            return node;
+        })
+      );
+  }, [setNodes]);
+
+  const handleClearAgentState = useCallback(() => {
+    if (!editorSelectedAgentId) return;
+    
+    clearAgentMetrics(editorSelectedAgentId);
+    
+    setNodes(nds => nds.map(node => ({
+        ...node,
+        data: { 
+            ...node.data, 
+            logs: [], 
+            metrics: null 
+        }
+    })));
+    
+    setEdges(eds => eds.map(edge => ({
+        ...edge,
+        data: { 
+            ...edge.data, 
+            fps: undefined, 
+            delay: undefined 
+        }
+    })));
+
+    showToast('Agent metrics and logs cleared', 'info');
+}, [editorSelectedAgentId, clearAgentMetrics, setNodes, setEdges, showToast]);
+
+
+  const onEdgeContextMenu = useCallback((event: React.MouseEvent, edge: Edge) => {
+    event.preventDefault(); 
+    
+    const flowPos = screenToFlowPosition({ x: event.clientX, y: event.clientY });
+    
+    setEdgeContextMenu({
+      visible: true,
+      x: flowPos.x,
+      y: flowPos.y,
+      edgeId: edge.id,
+    });
+  }, [screenToFlowPosition]);
+
+  const handleEdgeUpdate = useCallback((data: any) => {
+    if (!edgeContextMenu.edgeId) return;
+    setEdges((eds) =>
+      eds.map((edge) => {
+        if (edge.id === edgeContextMenu.edgeId) {
+          return { ...edge, data: { ...edge.data, ...data } };
+        }
+        return edge;
+      })
+    );
+  }, [setEdges, edgeContextMenu.edgeId]);
+
+  const handleEdgeDelete = useCallback(() => {
+    if (!edgeContextMenu.edgeId) return;
+    setEdges((eds) => eds.filter((e) => e.id !== edgeContextMenu.edgeId));
+    setEdgeContextMenu({ visible: false, x: 0, y: 0, edgeId: null });
+  }, [setEdges, edgeContextMenu.edgeId]);
+
+  const handleViewPerformance = useCallback(() => {
+      if (!edgeContextMenu.edgeId) return;
+      const edge = getEdges().find(e => e.id === edgeContextMenu.edgeId);
+      if (!edge) return;
+
+      const sourceNode = getNode(edge.source);
+      const targetNode = getNode(edge.target);
+      const sourceId = sourceNode?.data.user_id || edge.source;
+      const targetId = targetNode?.data.user_id || edge.target;
+      const pipeKey = `${sourceId}/${edge.sourceHandle}->${targetId}/${edge.targetHandle}`;
+      
+      if (editorSelectedAgentId) {
+          navigate(`/performance?agentId=${editorSelectedAgentId}&pipeId=${encodeURIComponent(pipeKey)}`);
+          setEdgeContextMenu({ visible: false, x: 0, y: 0, edgeId: null });
+      } else {
+        showToast('No agent selected to view performance', 'error');
+      }
+  }, [editorSelectedAgentId, getNode, navigate, edgeContextMenu.edgeId, getEdges, showToast]);
+
+  const onPaneClick = useCallback(() => {
+    if (edgeContextMenu.visible) setEdgeContextMenu({ visible: false, x: 0, y: 0, edgeId: null });
+    // Reset highlight
+    if (highlightedNodeId) setHighlightedNodeId(null);
+  }, [edgeContextMenu.visible, highlightedNodeId]);
+
+  const onNodeClick = useCallback((event: React.MouseEvent, node: Node) => {
+      setHighlightedNodeId(node.id);
+  }, []);
+
+  // --- Highlighting Logic ---
+  useEffect(() => {
+      if (!highlightedNodeId) {
+          // Reset: Clear highlighted ports
+          setNodes(nds => nds.map(n => {
+              if (n.data.highlightedPorts) {
+                  return { ...n, data: { ...n.data, highlightedPorts: undefined } };
+              }
+              return n;
+          }));
+          return;
+      }
+
+      // 1. Identify Connected Edges
+      const connectedEdges = edges.filter(
+          e => e.source === highlightedNodeId || e.target === highlightedNodeId
+      );
+
+      // 2. Identify Active Ports
+      const nodeActivePorts = new Map<string, Set<string>>(); // NodeID -> Set<PortName>
+
+      const addPort = (nodeId: string, handle: string | null | undefined) => {
+          if (!handle) return;
+          if (!nodeActivePorts.has(nodeId)) nodeActivePorts.set(nodeId, new Set());
+          nodeActivePorts.get(nodeId)!.add(handle);
+      };
+
+      connectedEdges.forEach(e => {
+          if (e.source === highlightedNodeId) {
+              addPort(highlightedNodeId, e.sourceHandle);
+              addPort(e.target, e.targetHandle);
+          } else {
+              addPort(highlightedNodeId, e.targetHandle);
+              addPort(e.source, e.sourceHandle);
+          }
+      });
+
+      // 3. Update Nodes with highlighted ports only
+      setNodes(nds => nds.map(n => {
+          const activePortsSet = nodeActivePorts.get(n.id);
+          const highlightedPorts = activePortsSet ? Array.from(activePortsSet) : undefined;
+
+          // Only update if state actually changed
+          if (JSON.stringify(n.data.highlightedPorts) !== JSON.stringify(highlightedPorts)) {
+              return { 
+                  ...n, 
+                  data: { 
+                      ...n.data, 
+                      highlightedPorts
+                  } 
+              };
+          }
+          return n;
+      }));
+
+  }, [highlightedNodeId, edges.length]); // Depend on edge count to re-calc if connections change, setNodes is stable
+
+  // --- History Hook ---
+  const { undo, redo, resetHistory } = useEditorHistory(nodes, edges, setNodes, setEdges, showToast);
+
+  // --- Persistence Handlers ---
+  const handleSave = useCallback(() => {
+      // Save current state (either auto-saved version or current nodes/edges)
+      const flow = autoSavedDataflow || reactFlowToDataflow(getNodes(), getEdges(), config);
+      saveDataflow(flow);
+      // Update originalDataflow to the newly saved version
+      setOriginalDataflow(flow);
+      setAutoSavedDataflow(null); // Clear auto-save after explicit save
+      setIsDirty(false);
+      // Clear working copy from localStorage since we've saved
+      const workingKey = `dataflow_working_${config.name}`;
+      localStorage.removeItem(workingKey);
+      showToast('Dataflow saved.', 'success');
+  }, [getNodes, getEdges, config, saveDataflow, showToast, autoSavedDataflow]);
+
+  // --- Shortcuts Hook ---
+  useEditorShortcuts({
+    showSearch, setShowSearch,
+    setSearchQuery,
+    mousePositionRef, // Pass ref instead of state
+    // Wrapper to set flow position from mouse position
+    setSearchPosition: (pos) => setSearchFlowPosition(screenToFlowPosition(pos)),
+    getNodes, setNodes,
+    screenToFlowPosition,
+    handleSave, undo, redo, showToast,
+    handleExternChange: handleParameterChange, 
+    handleIdChange, handleCollapseChange
+  });
+
+  // --- Mouse Position Tracking ---
+  useEffect(() => {
+      const handleMouseMove = (e: MouseEvent) => {
+          mousePositionRef.current = { x: e.clientX, y: e.clientY }; // Update ref, not state
+      };
+      window.addEventListener('mousemove', handleMouseMove);
+      return () => window.removeEventListener('mousemove', handleMouseMove);
+  }, []);
+
+  // --- Derived State: Agent & Capabilities ---
+  
+  // 1. Structural Agent (Stable reference, stale lastSeen) - Used for capabilities to prevent re-calc on every metric update
+  const structuralAgent = useMemo(() => 
+    agents.find(a => a.id === editorSelectedAgentId), 
+  [agents, editorSelectedAgentId]);
+
+  // 2. Display Agent (Volatile reference, fresh lastSeen) - Used for Toolbar/Status/PerformanceOverlay
+  // If realtimeAgent exists (hook loaded), use it. Otherwise fallback to structural.
+  const displayAgent = realtimeAgent || structuralAgent;
+
+  // 3. Merged Capabilities (Local + Agent)
+  const allCapabilities = useMemo<AgentCapabilities>(() => {
+     // Start with initial caps
+     const caps: AgentCapabilities = { ...(INITIAL_CAPABILITIES as AgentCapabilities) };
+     
+     // Merge local capabilities (baseline)
+     Object.values(localCapabilities).forEach(pkgCaps => {
+         pkgCaps.forEach(c => {
+             if (c.name) caps[c.name] = c;
+         });
+     });
+
+     // Merge selected agent capabilities (overrides local, but preserve actors/commanders if missing)
+     if (structuralAgent) {
+         Object.entries(structuralAgent.capabilities).forEach(([name, agentCap]) => {
+             const localCap = caps[name];
+             
+             // If agent capability is missing actors/commanders but local has them, preserve local
+             if (localCap) {
+                 caps[name] = {
+                     ...agentCap,
+                     actors: (agentCap as any).actors?.length > 0 ? (agentCap as any).actors : (localCap.actors || []),
+                     commanders: (agentCap as any).commanders?.length > 0 ? (agentCap as any).commanders : (localCap.commanders || [])
+                 };
+             } else {
+                 caps[name] = agentCap;
+             }
+         });
+     }
+     
+     return caps;
+  }, [structuralAgent, localCapabilities]);
+
+  // Reset pending status when agent changes
+  useEffect(() => setPendingStatus(null), [editorSelectedAgentId]);
+
+  // Refresh sidebar when capabilities change to ensure all nodes are visible
+  useEffect(() => {
+    setSidebarKey(prev => prev + 1);
+  }, [localCapabilities]);
+
+  
+  // Update unsupported nodes AND re-hydrate capabilities if missing (fixes load race condition)
+  useEffect(() => {
+    // If no capabilities loaded yet, don't mark as unsupported abruptly
+    // But we have localCapabilities now, so we can check.
+    
+    setNodes((nds) => nds.map((node) => {
+      const funcName = node.data.label as string;
+      const nodeData = node.data as any;
+
+      // 1. Find the Best Matching Capability
+      const variants = (Object.values(allCapabilities) as Capability[]).filter((c) => c.name === funcName);
+      
+      let matchedCap: Capability | undefined;
+      let isUnsupported = false;
+
+      if (variants.length === 0) {
+          isUnsupported = true;
+      } else {
+          // Try to find exact match by version/source if specified in node
+          if (nodeData.source && nodeData.version) {
+              matchedCap = variants.find((v: any) => 
+                  v.source === nodeData.source && 
+                  v.version === nodeData.version && 
+                  v.package_name === nodeData.package_name
+              );
+          }
+          // Fallback to default
+          if (!matchedCap) {
+              matchedCap = variants.find((v: any) => v.version === 'default') || variants[0];
+          }
+          isUnsupported = false;
+      }
+
+      // 2. Determine if we need an update
+      let needsUpdate = false;
+      const newData = { ...nodeData };
+
+      // Update Unsupported State
+      if (nodeData.isUnsupported !== isUnsupported) {
+          newData.isUnsupported = isUnsupported;
+          needsUpdate = true;
+      }
+
+      // Re-hydrate Capabilities (Inputs/Outputs/Params) if they are empty but we found a match
+      // This happens when the Editor loads before Agents/Capabilities are fetched.
+      if (matchedCap && !isUnsupported) {
+          const inputsEmpty = !nodeData.inputs || nodeData.inputs.length === 0;
+          const outputsEmpty = !nodeData.outputs || nodeData.outputs.length === 0;
+          const capInputs = matchedCap.inputs || [];
+          const capOutputs = matchedCap.outputs || [];
+
+          // Check if we need to hydrate (empty on node but exists on capability)
+          if ((inputsEmpty && capInputs.length > 0) || (outputsEmpty && capOutputs.length > 0)) {
+               newData.inputs = capInputs;
+               newData.outputs = capOutputs;
+               newData.parameterDefs = matchedCap.parameters || [];
+               newData.clients = matchedCap.clients || [];
+               newData.servers = matchedCap.servers || [];
+               newData.actors = matchedCap.actors || [];
+               newData.commanders = matchedCap.commanders || [];
+               
+               // Also sync version info if it was missing/defaulted
+               if (!newData.source) {
+                   newData.source = matchedCap.source;
+                   newData.version = matchedCap.version;
+                   newData.package_name = matchedCap.package_name;
+               }
+               needsUpdate = true;
+          }
+      }
+
+      if (needsUpdate) {
+          return { ...node, data: newData };
+      }
+      return node;
+    }));
+  }, [allCapabilities]); // Remove setNodes from dependencies - it's stable
+
+  // Check pending status resolution
+  useEffect(() => {
+      // Use realtime agent data for status checks to be responsive
+      if (realtimeAgent && pendingStatus) {
+          if (realtimeAgent.status === pendingStatus) {
+              setPendingStatus(null);
+          } else if (pendingStatus === 'STOPPED' && realtimeAgent.status === AgentStatus.ONLINE) {
+              // Fix: Agent status usually returns to ONLINE (idle) when stopped, 
+              // accept this as a successful stop resolution.
+              setPendingStatus(null);
+          } else if (realtimeAgent.status === AgentStatus.OFFLINE) {
+              setPendingStatus(null);
+              showToast('Agent went offline', 'error');
+          }
+      }
+  }, [realtimeAgent, pendingStatus, showToast]);
+
+    // Derived: Capabilities grouped by name (for multi-version support)
+  const capabilitiesByName = useMemo(() => {
+      const map = new Map<string, Capability[]>();
+      (Object.values(allCapabilities) as Capability[]).forEach((cap) => {
+          const c = cap;
+          const name = c.name || "Unknown";
+          if (!map.has(name)) map.set(name, []);
+          map.get(name)!.push(c);
+      });
+      return map;
+  }, [allCapabilities]);
+
+  // Group capabilities for Sidebar - Modified to pass raw grouped map for Sidebar to process hierarchically
+  const groupedCapabilities = useMemo(() => {
+      const grouped: Record<string, any[]> = {};
+      
+      Array.from(capabilitiesByName.keys()).forEach(name => {
+          const variants = capabilitiesByName.get(name)!;
+          // Pick default or first for display
+          const primary = variants.find(v => v.version === 'default') || variants[0];
+          
+          const cat = primary.category || 'Uncategorized';
+          if (!grouped[cat]) grouped[cat] = [];
+          
+          // Sidebar expects name to be the generic name
+          grouped[cat].push({ name, ...primary });
+      });
+
+      // Sorting of leaf items
+      Object.values(grouped).forEach(group => group.sort((a, b) => a.name.localeCompare(b.name)));
+      return grouped;
+  }, [capabilitiesByName]);
+
+  // Search Results
+  const searchResults = useMemo(() => {
+      if (!searchQuery) return [];
+      const results: any[] = [];
+      
+      Array.from(capabilitiesByName.keys()).forEach((name: string) => {
+          const variants = capabilitiesByName.get(name)!;
+          const primary = variants.find(v => v.version === 'default') || variants[0];
+
+          const nameScore = getMatchScore(searchQuery, name);
+          if (nameScore > 0) results.push({ name, ...primary, score: nameScore });
+          else if (primary.description) {
+              const descScore = getMatchScore(searchQuery, primary.description);
+              if (descScore > 0) results.push({ name, ...primary, score: descScore / 2 });
+          }
+      });
+
+      results.sort((a, b) => b.score - a.score);
+      return results.slice(0, 10); 
+  }, [capabilitiesByName, searchQuery]);
+
+  // --- Core Node Handlers ---
+  const handleVersionChange = useCallback((nodeId: string, newSource: string, newVersion: string, newPkg: string) => {
+        setNodes((nds) => nds.map(node => {
+            if (node.id === nodeId) {
+                // Find the new capability definition
+                const label = node.data.label as string;
+                const variants = capabilitiesByName.get(label);
+                const newCap = variants?.find(v => v.source === newSource && v.version === newVersion && v.package_name === newPkg);
+                
+                if (newCap) {
+                    return {
+                        ...node,
+                        data: {
+                            ...node.data,
+                            source: newSource,
+                            version: newVersion,
+                            package_name: newPkg,
+                            inputs: newCap.inputs || [],
+                            outputs: newCap.outputs || [],
+                            parameterDefs: newCap.parameters || [],
+                            clients: newCap.clients || [],
+                            servers: newCap.servers || [],
+                            actors: newCap.actors || [],
+                            commanders: newCap.commanders || [],
+                            // Note: We keep currentParameterValues, but some might be orphaned if not present in new definition
+                        }
+                    };
+                }
+            }
+            return node;
+        }));
+  }, [capabilitiesByName, setNodes]);
+
+  // --- Graph Manipulation Actions ---
+  const addNode = useCallback((nodeName: string, positionOrFlowPos: { x: number, y: number }) => {
+      const variants = capabilitiesByName.get(nodeName);
+      if (!variants || variants.length === 0) {
+          showToast(`Capability ${nodeName} not found`, 'error');
+          return;
+      }
+      
+      const cap = variants.find(v => v.version === 'default') || variants[0];
+      const uniqueId = `${nodeName}_${Date.now().toString().slice(-4)}`;
+      // Initialize default values for parameters
+      const initialParams: Record<string, any> = {};
+      if (cap && cap.parameters) {
+          cap.parameters.forEach(p => {
+              if (p.default_value !== undefined && p.default_value !== "") {
+                  // Attempt to parse number types, keep strings as is
+                  if (p.type === 'int' || p.type === 'double' || p.type === 'float') {
+                      const num = parseFloat(p.default_value);
+                      if (!isNaN(num)) {
+                          initialParams[p.name] = num;
+                      } else {
+                          initialParams[p.name] = p.default_value;
+                      }
+                  } else {
+                      initialParams[p.name] = p.default_value;
+                  }
+              }
+          });
+      }
+
+      // Assume input is Flow Coordinates because we control the calls.
+      const flowPos = positionOrFlowPos;
+      
+      const newNode: Node = {
+        id: uniqueId, type: 'custom', position: flowPos,
+        data: { 
+            id: uniqueId, user_id: uniqueId, label: nodeName,
+            inputs: cap.inputs || [], outputs: cap.outputs || [], 
+            parameterDefs: cap.parameters || [],
+            clients: cap.clients || [],
+            servers: cap.servers || [],
+            actors: cap.actors || [],
+            commanders: cap.commanders || [],
+            currentParameterValues: initialParams,
+            onParameterChange: handleParameterChange, 
+            onClientChange: handleClientChange,
+            onServerChange: handleServerChange,
+            onActorChange: handleActorChange,
+            onCommanderChange: handleCommanderChange,
+            onIdChange: handleIdChange,
+            onCollapseChange: handleCollapseChange, collapsed: false, isUnsupported: false,
+            onVersionChange: handleVersionChange,
+            source: cap.source, 
+            version: cap.version,
+            package_name: cap.package_name,
+            agentId: editorSelectedAgentId
+        },
+      };
+      setNodes((nds) => nds.concat(newNode));
+      setShowSearch(false);
+      setSearchQuery('');
+  }, [capabilitiesByName, handleParameterChange, handleClientChange, handleServerChange, handleActorChange, handleCommanderChange, handleIdChange, handleCollapseChange, handleVersionChange, setNodes, editorSelectedAgentId]);
+  
+  // --- Revert Handler (must be after handleVersionChange) ---
+  const handleRevert = useCallback(() => {
+      if (!originalDataflow) return;
+      
+      // Revert to original version
+      const rfData = dataflowToReactFlow(originalDataflow, allCapabilities);
+      const hydratedNodes = rfData.nodes.map(n => ({
+          ...n,
+          data: { 
+            ...n.data, 
+            onParameterChange: handleParameterChange, 
+            onClientChange: handleClientChange,
+            onServerChange: handleServerChange,
+            onActorChange: handleActorChange,
+            onCommanderChange: handleCommanderChange,
+            onIdChange: handleIdChange, 
+            onCollapseChange: handleCollapseChange,
+            onVersionChange: handleVersionChange,
+            agentId: editorSelectedAgentId
+          }
+      }));
+      setNodes(hydratedNodes);
+      setEdges(rfData.edges);
+      setConfig(originalDataflow.config);
+      setAutoSavedDataflow(null); // Clear auto-save
+      setIsDirty(false);
+      // Clear working copy from localStorage
+      const workingKey = `dataflow_working_${originalDataflow.config.name}`;
+      localStorage.removeItem(workingKey);
+      resetHistory(hydratedNodes, rfData.edges);
+      showToast('Reverted to saved version.', 'info');
+  }, [originalDataflow, allCapabilities, handleParameterChange, handleClientChange, handleServerChange, 
+      handleActorChange, handleCommanderChange, handleIdChange, handleCollapseChange, handleVersionChange, 
+      editorSelectedAgentId, setNodes, setEdges, resetHistory, showToast]);
+
+  const onConnect = useCallback((params: Connection) => {
+      const sourceNode = getNode(params.source);
+      const targetNode = getNode(params.target);
+      if (!sourceNode || !targetNode) return;
+
+      const sourceOutput = (sourceNode.data.outputs as any[])?.find(o => (o.name || o.description) === params.sourceHandle);
+      const targetInput = (targetNode.data.inputs as any[])?.find(i => (i.name || i.description) === params.targetHandle);
+
+      if (sourceOutput && targetInput) {
+        if (sourceOutput.type === targetInput.type || sourceOutput.type.includes('tuple')) {
+          setEdges((eds) => addEdge({ 
+              ...params, 
+              animated: true, 
+              type: 'default', 
+              data: { queue: 'FCFS', priority: 'Medium' } 
+          }, eds));
+        } else {
+          showToast(`Type Mismatch: ${sourceOutput.type} vs ${targetInput.type}`, 'error');
+        }
+      }
+    }, [setEdges, getNode, showToast]);
+
+  const onNodesDelete = useCallback((deleted: Node[]) => {
+      setEdges((eds) => eds.filter((edge) => !deleted.some((node) => node.id === edge.source || node.id === edge.target)));
+      // If highlighted node is deleted, clear highlight
+      if (deleted.some(n => n.id === highlightedNodeId)) {
+          setHighlightedNodeId(null);
+      }
+    }, [setEdges, highlightedNodeId]);
+
+  // --- Navigation Blocking & Dirty Check ---
+  useBeforeUnload(useCallback((e) => { if (isDirty) { e.preventDefault(); e.returnValue = ''; } }, [isDirty]));
+
+  // Auto-save logic: save current state immediately when changes are detected
+  useEffect(() => {
+    if (!originalDataflow) return;
+    
+    const currentFlow = reactFlowToDataflow(nodes, edges, config);
+    const originalJson = normalizeDataflow(originalDataflow);
+    const currentJson = normalizeDataflow(currentFlow);
+    const hasChanges = originalJson !== currentJson;
+    
+    setIsDirty(hasChanges);
+    
+    // Save immediately when there are changes
+    if (hasChanges) {
+      // Save to autoSavedDataflow state
+      setAutoSavedDataflow(currentFlow);
+      // Also save to localStorage as working copy (separate from saved version)
+      const workingKey = `dataflow_working_${config.name}`;
+      localStorage.setItem(workingKey, JSON.stringify(currentFlow));
+    } else {
+      // No changes, clear auto-save
+      setAutoSavedDataflow(null);
+      // Also clear working copy from localStorage
+      const workingKey = `dataflow_working_${config.name}`;
+      localStorage.removeItem(workingKey);
+    }
+  }, [nodes, edges, config, originalDataflow]);
+
+  // --- Data Loading ---
+  useEffect(() => {
+    if (activeDataflow) {
+      // Check if there's a working copy in localStorage
+      const workingKey = `dataflow_working_${activeDataflow.config.name}`;
+      const workingCopy = localStorage.getItem(workingKey);
+      
+      let dataflowToLoad = activeDataflow;
+      if (workingCopy) {
+        try {
+          const parsedWorking = JSON.parse(workingCopy);
+          dataflowToLoad = parsedWorking;
+        } catch (e) {
+          console.warn('[Editor] Failed to parse working copy, using saved version');
+        }
+      }
+      
+      setConfig(dataflowToLoad.config);
+      const rfData = dataflowToReactFlow(dataflowToLoad, allCapabilities);
+      const hydratedNodes = rfData.nodes.map(n => ({
+          ...n,
+          data: { 
+            ...n.data, 
+            onParameterChange: handleParameterChange, 
+            onClientChange: handleClientChange,
+            onServerChange: handleServerChange,
+            onActorChange: handleActorChange,
+            onCommanderChange: handleCommanderChange,
+            onIdChange: handleIdChange, 
+            onCollapseChange: handleCollapseChange,
+            onVersionChange: handleVersionChange,
+            agentId: editorSelectedAgentId
+          }
+      }));
+      setNodes(hydratedNodes);
+      setEdges(rfData.edges);
+      // originalDataflow is always the saved version (not working copy)
+      setOriginalDataflow(activeDataflow);
+      resetHistory(hydratedNodes, rfData.edges);
+      setHighlightedNodeId(null); // Reset selection on load
+      setTimeout(() => fitView({ padding: 0.2, duration: 0 }), 100);
+      
+      // Check compilation status for all packages in the dataflow
+      const packageIds = new Set<string>();
+      hydratedNodes.forEach(node => {
+        const nodeData = node.data as any;
+        const packageId = nodeData.package_name && nodeData.source 
+          ? `${nodeData.source}/${nodeData.package_name}` 
+          : null;
+        if (packageId) {
+          packageIds.add(packageId);
+        }
+      });
+      
+      // Load compilation logs for each package to check for errors
+      packageIds.forEach(async (packageId) => {
+        // Skip if we already have compilation state for this package
+        if (compilationState[packageId]) return;
+        
+        try {
+          const logs = await packageService.getCompileLog(packageId);
+          if (logs) {
+            // Check if logs contain errors
+            const hasErrors = logs.includes('[ERROR]') || logs.includes('error:') || logs.includes('Compilation Failed');
+            const errorMatches = logs.match(/error:/gi);
+            const errorCount = errorMatches ? errorMatches.length : 0;
+            
+            if (hasErrors || errorCount > 0) {
+              // Set compilation state with error
+              updateCompilationState(packageId, {
+                status: 'error',
+                logs: [logs],
+                errorCount: errorCount,
+                endTime: Date.now()
+              });
+            }
+          }
+        } catch (e) {
+          // Ignore errors (package might not have been compiled yet)
+        }
+      });
+    } else {
+        const newConfig = { name: `Flow_${Date.now().toString().slice(-4)}`, description: '' };
+        setConfig(newConfig);
+        setNodes([]);
+        setEdges([]);
+        setOriginalDataflow({ config: newConfig, nodes: [] });
+        resetHistory([], []);
+        setHighlightedNodeId(null);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); 
+
+  // --- Telemetry Loop ---
+    useEffect(() => {
+        if (!realtimeAgent) return;
+
+        // Get the clear timestamp for this agent
+        const clearTimestamp = getAgentClearTimestamp(editorSelectedAgentId);
+        const timeSinceLastClear = Date.now() - clearTimestamp;
+        const recentlyClearedMetrics = timeSinceLastClear < 2000;
+
+        // 1. Update Nodes (Logs & Metrics)
+        setNodes(nds => nds.map(node => {
+            const userId = node.data.user_id as string;
+            const metricsMap = realtimeAgent.nodeMetrics || (realtimeAgent as any).node_metrics || {};
+            const nodeMetric = metricsMap[userId];
+            
+            if (nodeMetric && !recentlyClearedMetrics) {
+                // Filter logs based on clear timestamp
+                const incomingLogs = nodeMetric.logs || [];
+                const filteredLogs = incomingLogs.filter((log: any) => {
+                    const logTime = log.timestamp * 1000; // Convert to milliseconds
+                    return logTime > clearTimestamp;
+                });
+
+                // Use the last 20 filtered logs for visual display in Editor
+                const recentLogs = filteredLogs.slice(-20);
+                
+                return { 
+                    ...node, 
+                    data: { 
+                        ...node.data, 
+                        metrics: nodeMetric.metrics || node.data.metrics, 
+                        logs: recentLogs // Keep Editor lightweight with filtered logs
+                    } 
+                };
+            }
+            return node;
+        }));
+
+        // 2. Update Edges (Pipe Metrics) OR Clear them if stopped
+        if (realtimeAgent.status === AgentStatus.RUNNING && !recentlyClearedMetrics) {
+            setEdges(eds => {
+                // Get current nodes from the closure - we need to be careful here
+                // Use getNodes() from useReactFlow instead
+                const currentNodes = getNodes();
+                
+                return eds.map(edge => {
+                    const sourceNode = currentNodes.find(n => n.id === edge.source);
+                    const targetNode = currentNodes.find(n => n.id === edge.target);
+                    const sourceId = (sourceNode?.data.user_id as string) || edge.source;
+                    const targetId = (targetNode?.data.user_id as string) || edge.target;
+                    const pipeKey = `${sourceId}/${edge.sourceHandle}->${targetId}/${edge.targetHandle}`;
+                    const metric = realtimeAgent.pipeMetrics?.[pipeKey];
+                    
+                    if (metric) {
+                        if (edge.data?.fps !== metric.fps || edge.data?.delay !== metric.sys_delay_ms) {
+                            return { ...edge, data: { ...edge.data, fps: metric.fps, delay: metric.sys_delay_ms } };
+                        }
+                    }
+                    return edge;
+                });
+            });
+        } else {
+            // If not running (e.g. STOPPED, ONLINE, OFFLINE), clear visual metrics from edges
+            setEdges(eds => eds.map(edge => {
+                if (edge.data?.fps !== undefined || edge.data?.delay !== undefined) {
+                    return { ...edge, data: { ...edge.data, fps: undefined, delay: undefined } };
+                }
+                return edge;
+            }));
+        }
+    }, [realtimeAgent, editorSelectedAgentId, getAgentClearTimestamp]); // Remove nodes, setNodes, setEdges - they're stable or accessed via functional updates
+
+  // --- Compilation State Sync ---
+  // Update nodes when compilation state changes
+  useEffect(() => {
+    // Batch update to avoid multiple renders
+    const updates: { [nodeId: string]: { hasError: boolean; isCompiling: boolean } } = {};
+    
+    // First pass: collect all updates
+    nodes.forEach(node => {
+      const packageId = node.data.package_name && node.data.source 
+        ? `${node.data.source}/${node.data.package_name}` 
+        : null;
+      
+      if (packageId) {
+        const state = compilationState[packageId];
+        let hasError = false;
+        let isCompiling = false;
+        
+        if (state) {
+          hasError = state.status === 'error' || (state.errorCount && state.errorCount > 0);
+          isCompiling = state.status === 'compiling';
+        }
+        
+        // Only record if changed
+        if (node.data.hasCompilationError !== hasError || node.data.isCompiling !== isCompiling) {
+          updates[node.id] = { hasError, isCompiling };
+        }
+      }
+    });
+    
+    // Second pass: apply updates if any
+    if (Object.keys(updates).length > 0) {
+      setNodes(nds => nds.map(node => {
+        const update = updates[node.id];
+        if (update) {
+          return {
+            ...node,
+            data: {
+              ...node.data,
+              hasCompilationError: update.hasError,
+              isCompiling: update.isCompiling
+            }
+          };
+        }
+        return node;
+      }));
+    }
+  }, [compilationState]); // Remove setNodes from dependencies - it's stable
+
+  const handleDownload = () => {
+      const flow = reactFlowToDataflow(nodes, edges, config);
+      const jsonString = JSON.stringify(flow, null, 2);
+      const blob = new Blob([jsonString], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${config.name || 'dataflow'}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    };
+
+  const handleSetStatus = async (state: 'RUNNING' | 'STOPPED') => {
+    // Check against displayAgent status/connection
+    if (!displayAgent) return;
+    setPendingStatus(state);
+    try {
+        const success = await setAgentState(displayAgent.id, state);
+        if (!success) {
+            setPendingStatus(null);
+            showToast(`Failed to set agent status to ${state}`, 'error');
+        }
+    } catch (e: any) {
+        setPendingStatus(null);
+        showToast(`Error setting status: ${e.message}`, 'error');
+    }
+  };
+
+  const handleDeploy = async () => {
+      if(!displayAgent) return;
+      
+      // Get the latest flow (either auto-saved or current state)
+      const flow = autoSavedDataflow || reactFlowToDataflow(nodes, edges, config);
+      
+      // Auto-save before deploying
+      if (isDirty) {
+          saveDataflow(flow);
+          setOriginalDataflow(flow);
+          setAutoSavedDataflow(null);
+          setIsDirty(false);
+          // Clear working copy from localStorage since we've saved
+          const workingKey = `dataflow_working_${config.name}`;
+          localStorage.removeItem(workingKey);
+          showToast('Auto-saved before deployment.', 'info');
+      }
+      
+      try {
+          const success = await deployDataflowToAgent(displayAgent.id, flow);
+          if (success) showToast('Deployed successfully!', 'success');
+      } catch (e: any) {
+          showToast(`Deploy failed: ${e.message}`, 'error');
+      }
+  };
+
+  const handleCompileDataflow = async () => {
+      // Logic handled via global compilation system in toolbar mostly
+  };
+
+  
+  const onDragOver = useCallback((event: React.DragEvent) => { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; }, []);
+  const onDrop = useCallback((event: React.DragEvent) => {
+      event.preventDefault();
+      const funcName = event.dataTransfer.getData('application/reactflow');
+      if (typeof funcName === 'undefined' || !funcName) return;
+      addNode(funcName, screenToFlowPosition({ x: event.clientX, y: event.clientY }));
+    }, [addNode, screenToFlowPosition]);
+
+  const onLayout = useCallback(() => {
+    const dagreGraph = new dagre.graphlib.Graph();
+    dagreGraph.setDefaultEdgeLabel(() => ({}));
+    const nodeWidth = 300;
+    const nodeHeight = 150;
+    dagreGraph.setGraph({ rankdir: 'LR' });
+    nodes.forEach((node) => dagreGraph.setNode(node.id, { width: nodeWidth, height: nodeHeight }));
+    edges.forEach((edge) => dagreGraph.setEdge(edge.source, edge.target));
+    dagre.layout(dagreGraph);
+    const layoutedNodes = nodes.map((node) => {
+      const nodeWithPosition = dagreGraph.node(node.id);
+      return { ...node, position: { x: nodeWithPosition.x - nodeWidth / 2, y: nodeWithPosition.y - nodeHeight / 2 } };
+    });
+    setNodes(layoutedNodes);
+    setTimeout(() => fitView({ duration: 800 }), 10);
+  }, [nodes, edges, setNodes, fitView]);
+
+  // Click outside to close search
+  useEffect(() => {
+      const handleClickOutside = (event: MouseEvent) => {
+          if (searchRef.current && !searchRef.current.contains(event.target as unknown as globalThis.Node)) {
+              setShowSearch(false);
+              setSearchQuery('');
+          }
+      };
+      if (showSearch) document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showSearch]);
+
+  
+  // Retrieve current edge data for the menu to ensure it displays active state
+  const activeContextMenuEdge = useMemo(() => {
+      if (!edgeContextMenu.edgeId) return null;
+      return edges.find(e => e.id === edgeContextMenu.edgeId);
+  }, [edges, edgeContextMenu.edgeId]);
+
+  return (
+    <div className="flex h-full relative">
+        {/* Sidebar */}
+        <EditorSidebar 
+          key={sidebarKey}
+          config={config} setConfig={setConfig} isDirty={isDirty}
+          agents={agents} 
+          selectedAgentId={editorSelectedAgentId} 
+          setSelectedAgentId={setEditorSelectedAgentId}
+          groupedCapabilities={groupedCapabilities} 
+          expandedCategories={expandedCategories}
+          toggleCategory={(cat) => setExpandedCategories(p => ({...p, [cat]: !p[cat]}))}
+          isSidebarCollapsed={false}
+        />
+
+        {/* Canvas Area */}
+        <div className="flex-1 h-full relative" onDrop={onDrop} onDragOver={onDragOver}>
+            <EditorToolbar 
+              isSidebarCollapsed={false} toggleSidebar={() => {}}
+              pendingStatus={pendingStatus} selectedAgent={displayAgent}
+              handleSetStatus={handleSetStatus} onLayout={onLayout} 
+              handleSave={handleSave} handleDownload={handleDownload} handleDeploy={handleDeploy}
+              handleRevert={handleRevert}
+              handleCompile={handleCompileDataflow}
+              handleClearAgentState={handleClearAgentState}
+              isDirty={isDirty} // Passed Prop
+            />
+
+            <PerformanceOverlay selectedAgent={displayAgent} />
+
+            <ReactFlow
+                nodes={nodes} edges={edges}
+                onNodesChange={onNodesChange} onEdgesChange={onEdgesChange}
+                onConnect={onConnect} onNodesDelete={onNodesDelete}
+                onEdgeContextMenu={onEdgeContextMenu}
+                onPaneClick={onPaneClick}
+                onNodeClick={onNodeClick} // Added Handler
+                deleteKeyCode={['Backspace', 'Delete']}
+                nodeTypes={nodeTypes} edgeTypes={edgeTypes}
+                fitView
+            >
+                <Background variant={BackgroundVariant.Dots} color={theme === 'dark' ? "#334155" : "#cbd5e1"} gap={20} />
+                <Controls className="!bg-white dark:!bg-slate-800 !border-slate-200 dark:!border-slate-700 [&>button]:!bg-white dark:[&>button]:!bg-slate-800 [&>button]:!border-slate-200 dark:[&>button]:!border-slate-700 [&>button]:text-slate-700 dark:[&>button]:text-slate-200 hover:[&>button]:!bg-slate-100 dark:hover:[&>button]:!bg-slate-700 [&>button]:!fill-slate-700 dark:[&>button]:!fill-slate-200" />
+                <Panel position="bottom-right" className="bg-white/50 dark:bg-slate-900/50 p-2 rounded text-[10px] text-slate-500">
+                    ID: {config.name || 'Untitled'}
+                </Panel>
+                
+                {/* Viewport Overlay for Zoomable/Pannable Elements */}
+                <ViewportOverlay>
+                    <EditorSearch 
+                        showSearch={showSearch} searchQuery={searchQuery} 
+                        searchPosition={searchFlowPosition}
+                        searchResults={searchResults} addNode={addNode} searchRef={searchRef}
+                    />
+                    
+                    {edgeContextMenu.visible && activeContextMenuEdge && (
+                        <EdgeContextMenu
+                            x={edgeContextMenu.x}
+                            y={edgeContextMenu.y}
+                            onClose={() => setEdgeContextMenu({ visible: false, x: 0, y: 0, edgeId: null })}
+                            onUpdate={handleEdgeUpdate}
+                            onDelete={handleEdgeDelete}
+                            onViewPerformance={handleViewPerformance}
+                            currentQueue={activeContextMenuEdge.data?.queue as string || 'FCFS'}
+                            currentPriority={activeContextMenuEdge.data?.priority as string || 'Medium'}
+                        />
+                    )}
+                </ViewportOverlay>
+            </ReactFlow>
+        </div>
+    </div>
+  );
+};
+
+export const Editor: React.FC = () => {
+  return (
+    <ReactFlowProvider>
+      <EditorContent />
+    </ReactFlowProvider>
+  );
+};

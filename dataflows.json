@@ -1,0 +1,39 @@
+[
+  {
+    "config": {
+      "name": "PrintDoubleTask",
+      "description": "Hello World"
+    },
+    "nodes": [
+      {
+        "id": "source",
+        "node": "RandomDoubleSource",
+        "externs": {
+          "lower": "-1",
+          "upper": "1"
+        },
+        "outputs": [
+          "random_value"
+        ],
+        "position": {
+          "x": 100,
+          "y": 100
+        }
+      },
+      {
+        "id": "sink",
+        "node": "PrintDouble",
+        "inputs": {
+          "image": "source/random_value"
+        },
+        "externs": {
+          "description": "Random value is"
+        },
+        "position": {
+          "x": 500,
+          "y": 100
+        }
+      }
+    ]
+  }
+]

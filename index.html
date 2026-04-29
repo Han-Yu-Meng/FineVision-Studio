@@ -1,0 +1,90 @@
+
+<!DOCTYPE html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>FineVision</title>
+    <link rel="icon" href="/assets/fins-lab.ico" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        darkMode: 'class',
+        theme: {
+          extend: {
+            fontFamily: {
+              sans: ['Inter', 'sans-serif'],
+              mono: ['JetBrains Mono', 'monospace'],
+            },
+          }
+        }
+      }
+    </script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xyflow/react@12.0.0/dist/style.css" />
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+      
+      body {
+        font-family: 'Inter', sans-serif;
+        /* Background and color are now handled by Layout.tsx via Tailwind classes */
+      }
+      
+      .font-mono {
+        font-family: 'JetBrains Mono', monospace;
+      }
+
+      /* React Flow Customizations */
+      .react-flow__node {
+        border-radius: 12px;
+        border: none;
+      }
+      .react-flow__handle {
+        width: 8px;
+        height: 8px;
+        background-color: #94a3b8;
+      }
+      /* Remove default stroke styling to let CustomEdge handle it */
+      .react-flow__edge-path {
+        stroke-width: 2;
+      }
+
+      /* Smooth Edge Animations */
+      /* FCFS: Pattern '4 4' (Sum 8). Move offset by -16 (2 cycles) to loop perfectly */
+      @keyframes flow-fcfs {
+        from { stroke-dashoffset: 0; }
+        to { stroke-dashoffset: -16; }
+      }
+
+      /* LGFS: Pattern '10 5' (Sum 15). Move offset by -30 (2 cycles) to loop perfectly */
+      @keyframes flow-lgfs {
+        from { stroke-dashoffset: 0; }
+        to { stroke-dashoffset: -30; }
+      }
+    </style>
+  <script type="importmap">
+{
+  "imports": {
+    "react": "https://esm.sh/react@18.3.1",
+    "react/": "https://esm.sh/react@18.3.1/",
+    "react-dom": "https://esm.sh/react-dom@18.3.1?deps=react@18.3.1",
+    "react-dom/client": "https://esm.sh/react-dom@18.3.1/client?deps=react@18.3.1",
+    "lucide-react": "https://esm.sh/lucide-react@0.294.0?deps=react@18.3.1",
+    "react-router-dom": "https://esm.sh/react-router-dom@6.23.0?deps=react@18.3.1,react-dom@18.3.1",
+    "@xyflow/react": "https://esm.sh/@xyflow/react@12.0.0?deps=react@18.3.1,react-dom@18.3.1",
+    "recharts": "https://esm.sh/recharts@2.12.7?deps=react@18.3.1,react-dom@18.3.1",
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
+    "@vitejs/plugin-react": "https://esm.sh/@vitejs/plugin-react@^5.1.2",
+    "vite": "https://esm.sh/vite@^7.3.0",
+    "path": "https://esm.sh/path@^0.12.7",
+    "@monaco-editor/react": "https://esm.sh/@monaco-editor/react@^4.7.0",
+    "dagre": "https://esm.sh/dagre@^0.8.5"
+  }
+}
+</script>
+<link rel="stylesheet" href="/index.css">
+</head>
+  <body>
+    <div id="root"></div>
+  <script type="module" src="/index.tsx"></script>
+</body>
+</html>
