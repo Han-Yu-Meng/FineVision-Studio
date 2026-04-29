@@ -69,16 +69,30 @@ export const dataflowToReactFlow = (flow: Dataflow, agentCapabilities?: any) => 
     if (n.inputs && typeof n.inputs === 'object') {
         Object.entries(n.inputs).forEach(([targetHandle, val]: [string, any]) => {
             let connectStr: string | null = null;
+            let scheduleStr: string | null = null;
             
             if (typeof val === 'string') {
                 connectStr = val;
-            } else if (val && typeof val === 'object' && val.connect) {
+            } else if (val && typeof val === 'object') {
                 connectStr = val.connect;
+                scheduleStr = val.schedule;
             }
 
             if (connectStr) {
                 const [sourceId, sourceHandle] = connectStr.split('/');
                 if (sourceId && sourceHandle) {
+                    // Parse schedule information if available
+                    let queue = 'FCFS';
+                    let priority = 'Medium';
+                    
+                    if (scheduleStr) {
+                        const priorityMatch = scheduleStr.match(/PRIORITY:([^;]+)/);
+                        const queueMatch = scheduleStr.match(/QUEUE:([^;]+)/);
+                        
+                        if (priorityMatch) priority = priorityMatch[1].trim();
+                        if (queueMatch) queue = queueMatch[1].trim();
+                    }
+                    
                     edges.push({
                         id: `e-${sourceId}-${sourceHandle}-${id}-${targetHandle}`,
                         source: sourceId,
@@ -88,8 +102,8 @@ export const dataflowToReactFlow = (flow: Dataflow, agentCapabilities?: any) => 
                         animated: true,
                         type: 'default',
                         data: {
-                            queue: 'FCFS',
-                            priority: 'Medium'
+                            queue,
+                            priority
                         }
                     });
                 }
@@ -161,7 +175,7 @@ export const reactFlowToDataflow = (nodes: Node[], edges: Edge[], config: any): 
     
     const inputsMap: Record<string, DataflowInputDef> = {};
     
-    if (data.inputs) {
+    if (data.inputs && Array.isArray(data.inputs)) {
         (data.inputs as any[]).forEach(i => {
             inputsMap[i.name] = {
                 id: i.id,
@@ -174,6 +188,12 @@ export const reactFlowToDataflow = (nodes: Node[], edges: Edge[], config: any): 
     edges.filter(e => e.target === n.id).forEach(e => {
         if (e.targetHandle && inputsMap[e.targetHandle]) {
             inputsMap[e.targetHandle].connect = `${e.source}/${e.sourceHandle}`;
+            
+            if (e.data) {
+                const priority = e.data.priority || 'Medium';
+                const queue = e.data.queue || 'FCFS';
+                inputsMap[e.targetHandle].schedule = `PRIORITY:${priority};QUEUE:${queue}`;
+            }
         }
     });
 
@@ -205,7 +225,7 @@ export const reactFlowToDataflow = (nodes: Node[], edges: Edge[], config: any): 
     };
   });
 
-  return { config, nodes: jsonNodes, pipes: [] }; 
+  return { config, nodes: jsonNodes}; 
 };
 
 export const normalizeDataflow = (flow: Dataflow) => {

@@ -11,6 +11,7 @@ interface EdgeContextMenuProps {
   onViewPerformance: () => void;
   currentQueue: string;
   currentPriority: string;
+  currentSchedule?: string; // Schedule string from target node input
 }
 
 export const EdgeContextMenu: React.FC<EdgeContextMenuProps> = ({
@@ -21,7 +22,8 @@ export const EdgeContextMenu: React.FC<EdgeContextMenuProps> = ({
   onDelete,
   onViewPerformance,
   currentQueue,
-  currentPriority
+  currentPriority,
+  currentSchedule
 }) => {
   const ref = useRef<HTMLDivElement>(null);
 

@@ -285,6 +285,11 @@ const EditorContent: React.FC = () => {
 
   const handleEdgeUpdate = useCallback((data: any) => {
     if (!edgeContextMenu.edgeId) return;
+    
+    // Get the current edge before updating
+    const currentEdge = getEdges().find(e => e.id === edgeContextMenu.edgeId);
+    if (!currentEdge) return;
+    
     setEdges((eds) =>
       eds.map((edge) => {
         if (edge.id === edgeContextMenu.edgeId) {
@@ -293,7 +298,40 @@ const EditorContent: React.FC = () => {
         return edge;
       })
     );
-  }, [setEdges, edgeContextMenu.edgeId]);
+    
+    // Also update target node's input schedule
+    setNodes((nds) =>
+      nds.map((node) => {
+        if (node.id === currentEdge.target) {
+          const nodeInputs = node.data.inputs as any[] || [];
+          if (currentEdge.targetHandle) {
+            const targetInputIndex = nodeInputs.findIndex((input: any) => 
+              input.name === currentEdge.targetHandle
+            );
+            
+            if (targetInputIndex !== -1) {
+              const priority = data.priority || currentEdge.data.priority || 'Medium';
+              const queue = data.queue || currentEdge.data.queue || 'FCFS';
+              const updatedInputs = [...nodeInputs];
+              updatedInputs[targetInputIndex] = {
+                ...updatedInputs[targetInputIndex],
+                schedule: `PRIORITY:${priority};QUEUE:${queue}`
+              };
+              
+              return {
+                ...node,
+                data: {
+                  ...node.data,
+                  inputs: updatedInputs
+                }
+              };
+            }
+          }
+        }
+        return node;
+      })
+    );
+  }, [setEdges, setNodes, edgeContextMenu.edgeId, getEdges]);
 
   const handleEdgeDelete = useCallback(() => {
     if (!edgeContextMenu.edgeId) return;
@@ -771,17 +809,47 @@ const EditorContent: React.FC = () => {
 
       if (sourceOutput && targetInput) {
         if (sourceOutput.type === targetInput.type || sourceOutput.type.includes('tuple')) {
+          const edgeData = { queue: 'FCFS', priority: 'Medium' };
+          
           setEdges((eds) => addEdge({ 
               ...params, 
               animated: true, 
               type: 'default', 
-              data: { queue: 'FCFS', priority: 'Medium' } 
+              data: edgeData
           }, eds));
+          
+          // Also update target node input with schedule information
+          setNodes((nds) =>
+            nds.map((node) => {
+              if (node.id === params.target) {
+                const updatedInputs = [...(node.data.inputs || [])];
+                const targetInputIndex = updatedInputs.findIndex((input: any) => 
+                  (input.name || input.description) === params.targetHandle
+                );
+                
+                if (targetInputIndex !== -1) {
+                  updatedInputs[targetInputIndex] = {
+                    ...updatedInputs[targetInputIndex],
+                    schedule: `PRIORITY:${edgeData.priority};QUEUE:${edgeData.queue}`
+                  };
+                }
+                
+                return {
+                  ...node,
+                  data: {
+                    ...node.data,
+                    inputs: updatedInputs
+                  }
+                };
+              }
+              return node;
+            })
+          );
         } else {
           showToast(`Type Mismatch: ${sourceOutput.type} vs ${targetInput.type}`, 'error');
         }
       }
-    }, [setEdges, getNode, showToast]);
+    }, [setEdges, setNodes, getNode, showToast]);
 
   const onNodesDelete = useCallback((deleted: Node[]) => {
       setEdges((eds) => eds.filter((edge) => !deleted.some((node) => node.id === edge.source || node.id === edge.target)));
@@ -1139,6 +1207,18 @@ const EditorContent: React.FC = () => {
       return edges.find(e => e.id === edgeContextMenu.edgeId);
   }, [edges, edgeContextMenu.edgeId]);
 
+  // Get current schedule from target node input
+  const getCurrentSchedule = useCallback((edge: Edge) => {
+      const targetNode = getNode(edge.target);
+      if (!targetNode || !edge.targetHandle) return null;
+      
+      const targetInputs = targetNode.data.inputs as any[];
+      if (!targetInputs || !Array.isArray(targetInputs)) return null;
+      
+      const targetInput = targetInputs.find((input: any) => input.name === edge.targetHandle);
+      return targetInput?.schedule || null;
+  }, [getNode]);
+
   return (
     <div className="flex h-full relative">
         {/* Sidebar */}
@@ -1204,6 +1284,7 @@ const EditorContent: React.FC = () => {
                             onViewPerformance={handleViewPerformance}
                             currentQueue={activeContextMenuEdge.data?.queue as string || 'FCFS'}
                             currentPriority={activeContextMenuEdge.data?.priority as string || 'Medium'}
+                            currentSchedule={getCurrentSchedule(activeContextMenuEdge)}
                         />
                     )}
                 </ViewportOverlay>

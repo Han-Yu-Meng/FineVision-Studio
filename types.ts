@@ -117,6 +117,7 @@ export interface DataflowInputDef {
     name: string;
     type: string;
     connect?: string; // "NodeId/PortName"
+    schedule?: string; // "PRIORITY:Urgent;QUEUE:FCFS"
 }
 
 export interface DataflowNode {
@@ -149,6 +150,5 @@ export interface DataflowConfig {
 
 export interface Dataflow {
   nodes: DataflowNode[];
-  pipes?: any[]; 
   config: DataflowConfig;
 }
