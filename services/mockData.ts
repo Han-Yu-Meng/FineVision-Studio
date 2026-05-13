@@ -2,9 +2,9 @@ import { Agent, AgentStatus } from '../types';
 
 export const INITIAL_CAPABILITIES = {};
 
-export const MOCK_AGENT_ID = "fins-001";
+const MOCK_AGENT_ID = "fins-001";
 
-export const MOCK_AGENT: Agent = {
+const MOCK_AGENT: Agent = {
   id: MOCK_AGENT_ID,
   status: AgentStatus.ONLINE,
   lastSeen: Date.now(),

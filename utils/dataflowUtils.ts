@@ -277,7 +277,7 @@ export const filterLogsByClearTime = (logs: any[], clearTimestamp: number): any[
 import DOMPurify from 'dompurify';
 import katex from 'katex';
 
-export const createCapabilityKey = (name: string, package_source?: string, version?: string): string => {
+const createCapabilityKey = (name: string, package_source?: string, version?: string): string => {
   const source = package_source || 'workspace';
   const ver = version || 'default';
   return `${source}/${name}@${ver}`;

@@ -372,7 +372,7 @@ function MainGanttChart({
        
        // Draw other latency (base color) - this is the remaining time
        if (otherWidth > 0) {
-         ctx.fillStyle = baseColor;
+         ctx.fillStyle = adjustColorBrightness(baseColor, 15); // adjustColorBrightness(baseColor, -15)
          ctx.shadowColor = isGrayscale ? 'transparent' : 'rgba(0,0,0,0.05)';
          ctx.shadowBlur = isGrayscale ? 0 : 4;
          ctx.shadowOffsetY = isGrayscale ? 0 : 2;
