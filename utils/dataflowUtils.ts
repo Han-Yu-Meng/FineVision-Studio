@@ -351,3 +351,99 @@ export const mergeCapabilities = (
 
   return merged;
 };
+
+export const generatePythonLaunch = (flow: Dataflow): string => {
+  const { nodes, config } = flow;
+
+  const sortedNodes: DataflowNode[] = [];
+  const visited = new Set<string>();
+  const visiting = new Set<string>();
+  const nodeIdMap = new Map(nodes.map(n => [n.id, n]));
+
+  const topologicalSort = (nodeId: string) => {
+    if (visited.has(nodeId)) return;
+    if (visiting.has(nodeId)) {
+        console.warn(`[Launch Export] Cycle detected at node: ${nodeId}`);
+        return;
+    }
+
+    visiting.add(nodeId);
+
+    const node = nodeIdMap.get(nodeId);
+    if (node && node.inputs) {
+      Object.values(node.inputs).forEach(input => {
+        if (input.connect) {
+          const [providerId] = input.connect.split('/');
+          if (nodeIdMap.has(providerId)) {
+            topologicalSort(providerId);
+          }
+        }
+      });
+    }
+
+    visiting.delete(nodeId);
+    visited.add(nodeId);
+    if (node) sortedNodes.push(node);
+  };
+
+  nodes.forEach(n => topologicalSort(n.id));
+
+  const sources = new Set(sortedNodes.map(n => n.source || 'nav'));
+  const isUniformSource = sources.size === 1;
+  const commonSource = isUniformSource ? Array.from(sources)[0] : null;
+
+  const nodeStrings = sortedNodes.map(node => {
+    const params = node.parameters && node.parameters.length > 0 
+      ? `\n                parameters=${JSON.stringify(
+          Object.fromEntries(node.parameters.map(p => [p.name, p.value ?? p.default_value]))
+        , null, 2).replace(/\n/g, '\n                ')},`
+      : '';
+
+    const remappingEntries: [string, string][] = [];
+    
+    Object.entries(node.inputs || {}).forEach(([portName, inputDef]) => {
+      if (inputDef.connect) {
+        remappingEntries.push([portName, inputDef.connect]);
+      }
+    });
+
+    if (node.outputs) {
+      node.outputs.forEach(out => {
+        const portName = out.name || out.description;
+        remappingEntries.push([portName, `${node.id}/${portName}`]);
+      });
+    }
+
+    const remappings = remappingEntries.length > 0
+      ? `\n                remappings=${JSON.stringify(
+          Object.fromEntries(remappingEntries)
+        , null, 2).replace(/\n/g, '\n                ')},`
+      : '';
+
+    const sourceAttr = isUniformSource ? '' : `\n                source="${node.source || 'nav'}",`;
+
+    return `            Node(${sourceAttr}
+                package="${node.package_name || 'unknown'}",
+                name="${node.name}",${params}${remappings}
+            ),`;
+  }).join('\n');
+
+  return `from fins import Node, Group, LaunchDescription, Agent${isUniformSource ? ', DefaultSource' : ''}
+
+def generate_launch():
+${isUniformSource ? `    with DefaultSource("${commonSource}"):` : ''}
+        main_group = Group(
+            [
+${nodeStrings}
+            ]
+        )
+
+        return LaunchDescription(groups=[main_group])
+
+if __name__ == "__main__":
+    with Agent(name="${config.name || 'fins'}", port=1896) as agent:
+        ld = generate_launch()
+        agent.launch(ld)
+        agent.spin()
+`;
+};

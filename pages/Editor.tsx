@@ -25,7 +25,7 @@ import { packageService } from '../services/packageService';
 import { Loader2 } from 'lucide-react';
 import { useNavigate, useBeforeUnload } from 'react-router-dom';
 import dagre from 'dagre';
-import { dataflowToReactFlow, reactFlowToDataflow, normalizeDataflow, getMatchScore } from '../utils/dataflowUtils';
+import { dataflowToReactFlow, reactFlowToDataflow, normalizeDataflow, getMatchScore, generatePythonLaunch } from '../utils/dataflowUtils';
 
 // Sub-components
 import { EditorSidebar } from '../components/editor/EditorSidebar';
@@ -1116,6 +1116,20 @@ const EditorContent: React.FC = () => {
       URL.revokeObjectURL(url);
     };
 
+  const handleDownloadPython = () => {
+      const flow = reactFlowToDataflow(nodes, edges, config);
+      const pythonCode = generatePythonLaunch(flow);
+      const blob = new Blob([pythonCode], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${config.name || 'launch'}.py`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    };
+
   const handleSetStatus = async (state: 'RUNNING' | 'STOPPED') => {
     // Check against displayAgent status/connection
     if (!displayAgent) return;
@@ -1240,7 +1254,7 @@ const EditorContent: React.FC = () => {
               isSidebarCollapsed={false} toggleSidebar={() => {}}
               pendingStatus={pendingStatus} selectedAgent={displayAgent}
               handleSetStatus={handleSetStatus} onLayout={onLayout} 
-              handleSave={handleSave} handleDownload={handleDownload} handleDeploy={handleDeploy}
+              handleSave={handleSave} handleDownload={handleDownload} handleDeploy={handleDeploy} handleDownloadPython={handleDownloadPython}
               handleRevert={handleRevert}
               handleCompile={handleCompileDataflow}
               handleClearAgentState={handleClearAgentState}

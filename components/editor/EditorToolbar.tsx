@@ -2,7 +2,8 @@
 import React from 'react';
 import { 
   Loader2, Square, Play, 
-  LayoutTemplate, Download, Save, UploadCloud, Eraser, Hammer, Undo2
+  LayoutTemplate, Download, Save, UploadCloud, Eraser, Hammer, Undo2,
+  FileCode
 } from 'lucide-react';
 import { Agent, AgentStatus } from '../../types';
 import { useSystem } from '../../context/SystemContext';
@@ -18,6 +19,7 @@ interface EditorToolbarProps {
   handleClearAgentState: () => void;
   handleSave: () => void;
   handleDownload: () => void;
+  handleDownloadPython: () => void;
   handleDeploy: () => void;
   handleRevert: () => void;
   handleCompile: () => void; 
@@ -34,6 +36,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
   handleClearAgentState,
   handleSave,
   handleDownload,
+  handleDownloadPython,
   handleDeploy,
   handleRevert,
   handleCompile,
@@ -143,6 +146,14 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
 
             <button onClick={handleDownload} className="p-2 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors" title="Download JSON">
                 <Download size={16} />
+            </button>
+
+            <button 
+                onClick={handleDownloadPython} 
+                className="p-2 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors" 
+                title="Export Python Launch"
+            >
+                <FileCode size={16} />
             </button>
 
             <button
