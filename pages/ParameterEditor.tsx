@@ -135,6 +135,35 @@ export const ParameterEditor: React.FC = () => {
     templateRootsRef.current = roots;
   };
 
+  const handleSave = useCallback(() => {
+    saveParameter({ name, content });
+    addNotification({ message: 'Saved', type: 'success' });
+  }, [saveParameter, name, content, addNotification]);
+
+  const handleDeploy = useCallback(async () => {
+    if (!targetAgentId) {
+      addNotification({ message: 'Please select an agent first', type: 'error' });
+      return;
+    }
+    try {
+      await deployParameterToAgent(targetAgentId, { name, content });
+      addNotification({ message: `Successfully deployed to ${targetAgentId}`, type: 'success' });
+    } catch (error) {
+      addNotification({ message: 'Deployment failed', type: 'error' });
+    }
+  }, [deployParameterToAgent, targetAgentId, name, content, addNotification]);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+        e.preventDefault();
+        handleSave();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleSave]);
+
   const fetchRemoteInfo = useCallback(async () => {
     if (!targetAgentId) return;
     setIsFetchingRemote(true);
@@ -255,10 +284,19 @@ export const ParameterEditor: React.FC = () => {
 
   const trimmedIsComment = (s: string) => s.trim().startsWith('#');
 
+  const saveRef = useRef(handleSave);
+  useEffect(() => {
+    saveRef.current = handleSave;
+  }, [handleSave]);
+
   const handleEditorDidMount = (editor: any, monaco: any) => {
     editorRef.current = editor;
     monacoRef.current = monaco;
     clearDisposables();
+
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
+      saveRef.current();
+    });
 
     const hoverProvider = monaco.languages.registerHoverProvider('yaml', {
       provideHover: (model: any, position: any) => {
@@ -373,13 +411,10 @@ export const ParameterEditor: React.FC = () => {
             <option value="">Select Agent...</option>
             {agents.map(a => <option key={a.id} value={a.id}>{a.id}</option>)}
           </select>
-          <button onClick={fetchRemoteInfo} className="p-2 text-slate-500 hover:text-blue-500 transition-colors" title="Reload Template">
-            <RefreshCw size={18} className={isFetchingRemote ? 'animate-spin' : ''} />
-          </button>
-          <button onClick={() => deployParameterToAgent(targetAgentId, { name, content })} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold flex items-center gap-2 transition-all shadow-md">
+          <button onClick={handleDeploy} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold flex items-center gap-2 transition-all shadow-md">
             <UploadCloud size={16} /> Deploy
           </button>
-          <button onClick={() => { saveParameter({ name, content }); addNotification({ message: 'Saved Locally', type: 'success' }); }} className="px-4 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 dark:text-white rounded-lg text-sm font-bold flex items-center gap-2 hover:bg-slate-50 dark:hover:bg-slate-700 transition-all shadow-sm">
+          <button onClick={handleSave} className="px-4 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 dark:text-white rounded-lg text-sm font-bold flex items-center gap-2 hover:bg-slate-50 dark:hover:bg-slate-700 transition-all shadow-sm">
             <Save size={16} /> Save
           </button>
         </div>
@@ -404,7 +439,7 @@ export const ParameterEditor: React.FC = () => {
             fixedOverflowWidgets: true,
             renderLineHighlight: "all",
             fontLigatures: false,
-            lightbulb: { enabled: true }
+            lightbulb: { enabled: 'on' as any }
           }}
         />
       </div>

@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
-import { Server, Network, Settings, Sun, Moon, Sparkles, Box, Layers, AlertCircle, CheckCircle, Info, X, ExternalLink, Bell, Trash2, CheckSquare, BarChart3 } from 'lucide-react';
+import { Server, Network, Settings, Sun, Moon, Sparkles, Box, Layers, AlertCircle, CheckCircle, Info, X, ExternalLink, Bell, Trash2, CheckSquare, BarChart3, BellOff } from 'lucide-react';
 import { useSystem } from '../context/SystemContext';
 
 export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -14,22 +14,58 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
   const isSidebarCollapsed = isEditor;
 
   const [isNotifOpen, setIsNotifOpen] = useState(false);
+  const [isRinging, setIsRinging] = useState(false);
   const [latestNotification, setLatestNotification] = useState<any>(null);
+  const [isToastLeaving, setIsToastLeaving] = useState(false);
+  const [removingNotifIds, setRemovingNotifIds] = useState<Set<string>>(new Set());
   const notifTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const notifPanelRef = useRef<HTMLDivElement>(null);
+  const prevNotifCount = useRef(notifications.length);
 
   useEffect(() => {
+      if (notifications.length > prevNotifCount.current) {
+          setIsRinging(true);
+          setTimeout(() => setIsRinging(false), 1000);
+      }
+      prevNotifCount.current = notifications.length;
+
       if (notifications.length > 0) {
           const newest = notifications[0];
           if (Date.now() - newest.timestamp < 1000) {
               setLatestNotification(newest);
+              setIsToastLeaving(false);
               if (notifTimeoutRef.current) clearTimeout(notifTimeoutRef.current);
               notifTimeoutRef.current = setTimeout(() => {
-                  setLatestNotification(null);
+                  setIsToastLeaving(true);
+                  setTimeout(() => {
+                      setLatestNotification(null);
+                      setIsToastLeaving(false);
+                  }, 300); // match pop-out duration
               }, 3000);
           }
       }
   }, [notifications]);
+
+  const handleDismissToast = (e?: React.MouseEvent) => {
+      if (e) e.stopPropagation();
+      setIsToastLeaving(true);
+      setTimeout(() => {
+          setLatestNotification(null);
+          setIsToastLeaving(false);
+      }, 300);
+  };
+
+  const handleRemoveHistoryNotif = (id: string) => {
+      setRemovingNotifIds(prev => new Set(prev).add(id));
+      setTimeout(() => {
+          removeNotification(id);
+          setRemovingNotifIds(prev => {
+              const next = new Set(prev);
+              next.delete(id);
+              return next;
+          });
+      }, 300);
+  };
 
   useEffect(() => {
       const handleClickOutside = (event: MouseEvent) => {
@@ -200,13 +236,17 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
             {/* 1. Transient Toast (Latest) */}
             {latestNotification && !isNotifOpen && (
                 <div 
-                    className={`pointer-events-auto shadow-xl rounded-lg border backdrop-blur-md p-3 mb-2 animate-in slide-in-from-right fade-in duration-300 flex items-center gap-3 max-w-[320px] cursor-pointer ${
+                    key={latestNotification.id}
+                    className={`pointer-events-auto shadow-xl rounded-lg border backdrop-blur-md p-3 mb-2 flex items-center gap-3 max-w-[320px] cursor-pointer ${
+                        isToastLeaving ? 'animate-pop-out' : 'animate-pop-in'
+                    } ${
                         latestNotification.type === 'error' ? 'bg-red-50/95 dark:bg-red-950/95 border-red-200 dark:border-red-900 text-red-900 dark:text-red-100' :
                         latestNotification.type === 'success' ? 'bg-green-50/95 dark:bg-green-950/95 border-green-200 dark:border-green-900 text-green-900 dark:text-green-100' :
                         'bg-white/95 dark:bg-slate-900/95 border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100'
                     }`}
+                    style={{ perspective: '1000px' }}
                     onClick={() => {
-                        setLatestNotification(null);
+                        handleDismissToast();
                         setIsNotifOpen(true);
                     }}
                 >
@@ -214,7 +254,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
                         {latestNotification.type === 'error' ? <AlertCircle size={18} /> : latestNotification.type === 'success' ? <CheckCircle size={18} /> : <Info size={18} />}
                     </div>
                     <div className="text-xs font-medium truncate flex-1">{latestNotification.message}</div>
-                    <button onClick={(e) => { e.stopPropagation(); setLatestNotification(null); }} className="opacity-50 hover:opacity-100"><X size={14}/></button>
+                    <button onClick={handleDismissToast} className="opacity-50 hover:opacity-100"><X size={14}/></button>
                 </div>
             )}
 
@@ -240,16 +280,21 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
                     </div>
                     <div className="flex-1 overflow-y-auto p-2 space-y-1 custom-scrollbar">
                         {notifications.length === 0 ? (
-                            <div className="text-center py-8 text-slate-400 text-xs italic">No notifications</div>
+                            <div className="flex flex-col items-center justify-center py-12 text-slate-300 dark:text-slate-700">
+                                <BellOff size={32} strokeWidth={1.5} />
+                            </div>
                         ) : (
                             notifications.map(n => (
                                 <div 
                                     key={n.id} 
                                     className={`relative group p-2.5 rounded-lg border flex gap-3 transition-colors ${
+                                        removingNotifIds.has(n.id) ? 'animate-pop-out' : 'animate-pop-in'
+                                    } ${
                                         n.type === 'error' ? 'bg-red-50/50 dark:bg-red-900/10 border-red-100 dark:border-red-900/30' : 
                                         n.type === 'success' ? 'bg-green-50/50 dark:bg-green-900/10 border-green-100 dark:border-green-900/30' :
                                         'bg-white dark:bg-slate-800 border-slate-100 dark:border-slate-700'
                                     }`}
+                                    style={{ perspective: '1000px' }}
                                 >
                                     <div className={`mt-0.5 shrink-0 ${
                                         n.type === 'error' ? 'text-red-500' : n.type === 'success' ? 'text-green-500' : 'text-blue-500'
@@ -276,7 +321,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
                                         </div>
                                     </div>
                                     <button 
-                                        onClick={() => removeNotification(n.id)}
+                                        onClick={() => handleRemoveHistoryNotif(n.id)}
                                         className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-opacity"
                                     >
                                         <X size={12} />
@@ -296,9 +341,12 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
                     isNotifOpen 
                         ? 'bg-slate-200 dark:bg-slate-700 text-slate-900 dark:text-white' 
                         : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700'
-                }`}
+                } ${isRinging ? 'scale-110 ring-2 ring-blue-500 ring-offset-2 dark:ring-offset-slate-900' : ''}`}
             >
-                <Bell size={20} />
+                {isRinging && (
+                    <span className="absolute inset-0 rounded-full bg-blue-500 animate-ping opacity-25"></span>
+                )}
+                <Bell size={20} className={isRinging ? 'text-blue-600 dark:text-blue-400 animate-wiggle' : ''} />
                 {hasUnreadError && !isNotifOpen && (
                     <span className="absolute top-0 right-0 w-3 h-3 bg-red-500 border-2 border-white dark:border-slate-800 rounded-full animate-pulse"></span>
                 )}
