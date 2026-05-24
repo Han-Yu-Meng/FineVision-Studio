@@ -343,34 +343,112 @@ export const ParameterEditor: React.FC = () => {
           .map((m: any) => {
             const data = JSON.parse(m.code);
             const missingPaths = data.missingFields as string[];
-            const indentSize = 2;
-            const spaces = " ".repeat(data.parentIndent + indentSize);
+            const parentIndent = data.parentIndent;
+            const parentLine = m.startLineNumber;
             
-            const textToInsert = "\n" + missingPaths.map(p => {
-              const key = p.split('.').pop();
-              const meta = templateMetaRef.current.get(p);
-              let valuePart = "";
-              if (!meta?.isObject) {
-                const def = meta?.defaultValue || '';
-                const isString = meta?.type.toLowerCase().includes('string');
-                // 修复：字符串类型强制添加双引号，空默认值补全为 ""
-                valuePart = isString ? ` "${def}"` : ` ${def}`;
+            // 获取父节点路径
+            const firstMissing = missingPaths[0];
+            const lastDotIndex = firstMissing.lastIndexOf('.');
+            const parentPath = lastDotIndex !== -1 ? firstMissing.substring(0, lastDotIndex) : "";
+
+            // 获取模板中该层级的所有子节点顺序
+            const allSiblingsInTemplate = Array.from(templateMetaRef.current.keys()).filter(p => {
+              const pDotIndex = p.lastIndexOf('.');
+              const pParent = pDotIndex !== -1 ? p.substring(0, pDotIndex) : "";
+              return pParent === parentPath;
+            });
+
+            // 扫描当前文档，找到已存在子节点的位置
+            const existingSiblingLines = new Map<string, number>();
+            const lineCount = model.getLineCount();
+            const lineStack: { indent: number; path: string }[] = [];
+            
+            for (let i = 1; i <= lineCount; i++) {
+              const line = model.getLineContent(i);
+              const indent = line.search(/\S/);
+              if (indent === -1) continue;
+              const match = line.match(/^\s*([\w.]+)\s*:(.*)/);
+              if (!match || trimmedIsComment(line)) continue;
+
+              const key = match[1];
+              while (lineStack.length > 0 && lineStack[lineStack.length - 1].indent >= indent) lineStack.pop();
+              const pPath = lineStack.length > 0 ? lineStack[lineStack.length - 1].path + "." : "";
+              const fullPath = pPath + key;
+              lineStack.push({ indent, path: fullPath });
+
+              if (allSiblingsInTemplate.includes(fullPath)) {
+                existingSiblingLines.set(fullPath, i);
               }
-              return `${spaces}${key}:${valuePart}`;
-            }).join("\n");
+            }
+
+            // 计算结束行（包括嵌套内容）
+            const getEndOfBlock = (lineNum: number) => {
+              const startIndent = model.getLineContent(lineNum).search(/\S/);
+              let lastLine = lineNum;
+              for (let j = lineNum + 1; j <= lineCount; j++) {
+                const l = model.getLineContent(j);
+                const trimmed = l.trim();
+                if (!trimmed) continue;
+                if (trimmed.startsWith('#')) {
+                    lastLine = j;
+                    continue;
+                }
+                const indent = l.search(/\S/);
+                if (indent <= startIndent) break;
+                lastLine = j;
+              }
+              return lastLine;
+            };
+
+            const indentSize = 2;
+            const spaces = " ".repeat(parentIndent + indentSize);
+            
+            const edits: any[] = [];
+            let currentInsertionLine = parentLine;
+            let pendingText = "";
+
+            allSiblingsInTemplate.forEach(path => {
+              if (missingPaths.includes(path)) {
+                const key = path.split('.').pop();
+                const meta = templateMetaRef.current.get(path);
+                let valuePart = "";
+                if (!meta?.isObject) {
+                  const def = meta?.defaultValue || '';
+                  const isString = meta?.type.toLowerCase().includes('string');
+                  valuePart = isString ? ` "${def}"` : ` ${def}`;
+                }
+                pendingText += `\n${spaces}${key}:${valuePart}`;
+              } else if (existingSiblingLines.has(path)) {
+                if (pendingText) {
+                  edits.push({
+                    range: new monaco.Range(currentInsertionLine, model.getLineMaxColumn(currentInsertionLine) + 1, currentInsertionLine, model.getLineMaxColumn(currentInsertionLine) + 1),
+                    text: pendingText
+                  });
+                  pendingText = "";
+                }
+                currentInsertionLine = getEndOfBlock(existingSiblingLines.get(path)!);
+              }
+            });
+
+            if (pendingText) {
+              edits.push({
+                range: new monaco.Range(currentInsertionLine, model.getLineMaxColumn(currentInsertionLine) + 1, currentInsertionLine, model.getLineMaxColumn(currentInsertionLine) + 1),
+                text: pendingText
+              });
+            }
 
             return {
-              title: `✨ Insert missing parameters`,
+              title: `✨ Insert missing parameters (Ordered)`,
               diagnostics: [m],
               kind: "quickfix",
               edit: {
-                edits: [{
-                    resource: model.uri,
-                    textEdit: {
-                      range: new monaco.Range(m.startLineNumber, model.getLineMaxColumn(m.startLineNumber), m.startLineNumber, model.getLineMaxColumn(m.startLineNumber)),
-                      text: textToInsert
-                    }
-                }]
+                edits: edits.map(e => ({
+                  resource: model.uri,
+                  textEdit: {
+                    range: e.range,
+                    text: e.text
+                  }
+                }))
               },
               isPreferred: true
             };
