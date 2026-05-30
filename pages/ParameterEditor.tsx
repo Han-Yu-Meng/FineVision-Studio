@@ -12,7 +12,11 @@ loader.config({
 interface ParamMeta {
   defaultValue: string;
   type: string;
+  description?: string;
   isObject: boolean;
+  options?: string[];
+  min?: number;
+  max?: number;
 }
 
 export const ParameterEditor: React.FC = () => {
@@ -96,41 +100,104 @@ export const ParameterEditor: React.FC = () => {
     return () => clearDisposables();
   }, []);
 
-  const parseTemplateMetadata = (yamlStr: string) => {
+  const parseTemplateMetadata = (templateObj: any, yamlStr?: string) => {
     const metaMap = new Map<string, ParamMeta>();
     const roots = new Set<string>();
-    const lines = yamlStr.split('\n');
-    const stack: { indent: number; path: string }[] = [];
 
-    lines.forEach(line => {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith('#')) return;
+    // 1. 如果提供了 yamlStr，先从中提取有序路径
+    const orderedPaths: string[] = [];
+    if (yamlStr) {
+      const lines = yamlStr.split('\n');
+      const stack: { indent: number; path: string }[] = [];
+      lines.forEach(line => {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) return;
+        const indent = line.search(/\S/);
+        const match = line.match(/^\s*([\w.]+)\s*:/);
+        if (!match) return;
 
-      const indent = line.search(/\S/);
-      const [keyPart, commentPart] = line.split('#');
-      
-      // 修复：使用第一个冒号分割，确保数组内容不被截断
-      const firstColonIndex = keyPart.indexOf(':');
-      if (firstColonIndex === -1) return;
+        const key = match[1];
+        while (stack.length > 0 && stack[stack.length - 1].indent >= indent) stack.pop();
+        const parentPath = stack.length > 0 ? stack[stack.length - 1].path + "." : "";
+        const currentPath = parentPath + key;
 
-      const key = keyPart.substring(0, firstColonIndex).trim();
-      const val = keyPart.substring(firstColonIndex + 1).trim();
-
-      while (stack.length > 0 && stack[stack.length - 1].indent >= indent) stack.pop();
-      const parentPath = stack.length > 0 ? stack[stack.length - 1].path + "." : "";
-      const currentPath = parentPath + key;
-
-      if (stack.length === 0) roots.add(key);
-
-      const type = commentPart?.includes('type:') ? commentPart.split('type:')[1].trim() : 'unknown';
-      
-      if (val !== "") {
-        metaMap.set(currentPath, { defaultValue: val, type, isObject: false });
-      } else {
+        orderedPaths.push(currentPath);
         stack.push({ indent, path: currentPath });
-        metaMap.set(currentPath, { defaultValue: '', type: 'object', isObject: true });
+        if (stack.length === 1) roots.add(key);
+      });
+    }
+
+    // 2. 遍历 JSON 提取元数据作为查找表
+    const jsonMetaLookup = new Map<string, any>();
+    const traverseJson = (obj: any, path: string = "") => {
+      if (!obj || typeof obj !== 'object') return;
+      if (obj.type && obj.hasOwnProperty('default')) {
+        jsonMetaLookup.set(path, obj);
+        return;
       }
-    });
+      Object.entries(obj).forEach(([key, value]) => {
+        const currentPath = path ? `${path}.${key}` : key;
+        jsonMetaLookup.set(currentPath, { isObject: true });
+        traverseJson(value, currentPath);
+      });
+    };
+    traverseJson(templateObj);
+
+    // 3. 按 YAML 顺序构建最终的 metaMap
+    if (orderedPaths.length > 0) {
+      orderedPaths.forEach(path => {
+        const obj = jsonMetaLookup.get(path);
+        if (!obj) return;
+
+        if (obj.isObject) {
+          metaMap.set(path, { defaultValue: '', type: 'object', isObject: true });
+        } else {
+          let defValue = obj.default;
+          if (Array.isArray(defValue)) {
+            defValue = JSON.stringify(defValue);
+          } else {
+            defValue = String(defValue);
+          }
+
+          metaMap.set(path, {
+            defaultValue: defValue,
+            type: obj.type,
+            description: obj.description,
+            isObject: false,
+            options: Array.isArray(obj.options) ? obj.options.map((o: any) => String(o)) : undefined,
+            min: obj.min !== undefined ? Number(obj.min) : undefined,
+            max: obj.max !== undefined ? Number(obj.max) : undefined
+          });
+        }
+      });
+    } else {
+      // 回退：如果没提供 YAML，则按 JSON 遍历顺序
+      jsonMetaLookup.forEach((obj, path) => {
+        if (path === "") return;
+        if (obj.isObject) {
+          metaMap.set(path, { defaultValue: '', type: 'object', isObject: true });
+          const root = path.split('.')[0];
+          roots.add(root);
+        } else {
+          let defValue = obj.default;
+          if (Array.isArray(defValue)) defValue = JSON.stringify(defValue);
+          else defValue = String(defValue);
+
+          metaMap.set(path, {
+            defaultValue: defValue,
+            type: obj.type,
+            description: obj.description,
+            isObject: false,
+            options: Array.isArray(obj.options) ? obj.options.map((o: any) => String(o)) : undefined,
+            min: obj.min !== undefined ? Number(obj.min) : undefined,
+            max: obj.max !== undefined ? Number(obj.max) : undefined
+          });
+          const root = path.split('.')[0];
+          roots.add(root);
+        }
+      });
+    }
+
     templateMetaRef.current = metaMap;
     templateRootsRef.current = roots;
   };
@@ -169,7 +236,12 @@ export const ParameterEditor: React.FC = () => {
     setIsFetchingRemote(true);
     try {
       const res = await sendAgentCommand(targetAgentId, '/get_params_template');
-      parseTemplateMetadata(res.template_yaml || '');
+      if (res.template_json) {
+        parseTemplateMetadata(res.template_json, res.template_yaml);
+      } else if (res.template_yaml) {
+        // 后备：如果只有 YAML，也可以直接解析（但没有丰富元数据）
+        // parseTemplateMetadata({}, res.template_yaml);
+      }
       if (editorRef.current) validateYaml();
     } catch (e: any) {
       console.error(e);
@@ -252,6 +324,45 @@ export const ParameterEditor: React.FC = () => {
               endColumn: line.length + 1,
             });
           }
+
+          // 选项检查
+          if (meta.options && actualValue !== undefined && actualValue !== null) {
+            const actualStr = String(actualValue);
+            if (!meta.options.includes(actualStr)) {
+              markers.push({
+                severity: monaco.MarkerSeverity.Error,
+                message: `Invalid value: Expected one of [${meta.options.join(', ')}], but got ${actualStr}`,
+                startLineNumber: i,
+                startColumn: line.indexOf(':') + 2,
+                endLineNumber: i,
+                endColumn: line.length + 1,
+              });
+            }
+          }
+
+          // 数值范围检查
+          if (typeof actualValue === 'number') {
+            if (meta.min !== undefined && actualValue < meta.min) {
+              markers.push({
+                severity: monaco.MarkerSeverity.Warning,
+                message: `Value out of range: Min is ${meta.min}, but got ${actualValue}`,
+                startLineNumber: i,
+                startColumn: line.indexOf(':') + 2,
+                endLineNumber: i,
+                endColumn: line.length + 1,
+              });
+            }
+            if (meta.max !== undefined && actualValue > meta.max) {
+              markers.push({
+                severity: monaco.MarkerSeverity.Warning,
+                message: `Value out of range: Max is ${meta.max}, but got ${actualValue}`,
+                startLineNumber: i,
+                startColumn: line.indexOf(':') + 2,
+                endLineNumber: i,
+                endColumn: line.length + 1,
+              });
+            }
+          }
         }
 
         // 缺失字段检查
@@ -322,13 +433,29 @@ export const ParameterEditor: React.FC = () => {
         const fullPath = parentPath ? `${parentPath}.${key}` : key;
         const meta = templateMetaRef.current.get(fullPath);
         if (meta) {
-          return {
-            contents: [
-              { value: `**Path:** \`${fullPath}\`` },
-              { value: `**Type:** \`${meta.type}\`` },
-              !meta.isObject ? { value: `**Default:** \`${meta.defaultValue}\`` } : { value: '*Object Container*' }
-            ]
-          };
+          const contents: any[] = [
+            { value: `**Path:** \`${fullPath}\`` },
+            { value: `**Type:** \`${meta.type}\`` }
+          ];
+          
+          if (meta.description) {
+            contents.push({ value: `**Description:** ${meta.description}` });
+          }
+
+          if (!meta.isObject) {
+            contents.push({ value: `**Default:** \`${meta.defaultValue}\`` });
+            if (meta.options) {
+              contents.push({ value: `**Options:** ${meta.options.map(o => `\`${o}\``).join(', ')}` });
+            }
+            if (meta.min !== undefined || meta.max !== undefined) {
+              const range = `[${meta.min !== undefined ? meta.min : '-∞'}, ${meta.max !== undefined ? meta.max : '+∞'}]`;
+              contents.push({ value: `**Range:** \`${range}\`` });
+            }
+          } else {
+            contents.push({ value: '*Object Container*' });
+          }
+
+          return { contents };
         }
         return null;
       }
@@ -416,6 +543,9 @@ export const ParameterEditor: React.FC = () => {
                   const def = meta?.defaultValue || '';
                   const isString = meta?.type.toLowerCase().includes('string');
                   valuePart = isString ? ` "${def}"` : ` ${def}`;
+                  if (meta?.description) {
+                    valuePart += ` # ${meta.description}`;
+                  }
                 }
                 pendingText += `\n${spaces}${key}:${valuePart}`;
               } else if (existingSiblingLines.has(path)) {
@@ -456,8 +586,52 @@ export const ParameterEditor: React.FC = () => {
         return { actions, dispose: () => {} };
       }
     });
+
+    const completionProvider = monaco.languages.registerCompletionItemProvider('yaml', {
+      triggerCharacters: [':', ' '],
+      provideCompletionItems: (model: any, position: any) => {
+        const lineContent = model.getLineContent(position.lineNumber);
+        const match = lineContent.match(/^\s*([\w.]+)\s*:/);
+        if (!match) return { suggestions: [] };
+
+        const key = match[1];
+        const colonIndex = lineContent.indexOf(':');
+        
+        // 只有在冒号之后才触发补全
+        if (position.column <= colonIndex + 1) return { suggestions: [] };
+
+        // 溯源路径
+        let currentIndent = lineContent.search(/\S/);
+        let parentPath = "";
+        for (let i = position.lineNumber - 1; i >= 1; i--) {
+          const prevLine = model.getLineContent(i);
+          const prevIndent = prevLine.search(/\S/);
+          const prevMatch = prevLine.match(/^\s*([\w.]+)\s*:/);
+          if (prevMatch && prevIndent < currentIndent && !trimmedIsComment(prevLine)) {
+            parentPath = prevMatch[1] + (parentPath ? "." + parentPath : "");
+            currentIndent = prevIndent;
+            if (currentIndent === 0) break;
+          }
+        }
+        const fullPath = parentPath ? `${parentPath}.${key}` : key;
+        const meta = templateMetaRef.current.get(fullPath);
+
+        if (meta && meta.options) {
+          return {
+            suggestions: meta.options.map((opt: string) => ({
+              label: opt,
+              kind: monaco.languages.CompletionItemKind.Value,
+              insertText: opt,
+              detail: `Option for ${key}`,
+              range: new monaco.Range(position.lineNumber, colonIndex + 2, position.lineNumber, model.getLineMaxColumn(position.lineNumber))
+            }))
+          };
+        }
+        return { suggestions: [] };
+      }
+    });
     
-    disposablesRef.current.push(hoverProvider, codeActionProvider);
+    disposablesRef.current.push(hoverProvider, codeActionProvider, completionProvider);
     editor.onDidChangeModelContent(() => validateYaml());
     setTimeout(() => { editor.layout(); validateYaml(); }, 100);
   };
