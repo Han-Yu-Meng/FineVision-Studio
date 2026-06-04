@@ -777,7 +777,9 @@ export const DataflowEditor: React.FC<{
             onActorChange: handleActorChange,
             onCommanderChange: handleCommanderChange,
             onIdChange: handleIdChange,
-            onCollapseChange: handleCollapseChange, collapsed: false, isUnsupported: false,
+            onCollapseChange: handleCollapseChange, 
+            collapsed: false, // 用户手动添加的节点默认展开，方便编辑
+            isUnsupported: false,
             onVersionChange: handleVersionChange,
             source: cap.source, 
             version: cap.version,
@@ -796,21 +798,28 @@ export const DataflowEditor: React.FC<{
       
       // Revert to original version
       const rfData = dataflowToReactFlow(originalDataflow, allCapabilities);
-      const hydratedNodes = rfData.nodes.map(n => ({
-          ...n,
-          data: { 
-            ...n.data, 
-            onParameterChange: handleParameterChange, 
-            onClientChange: handleClientChange,
-            onServerChange: handleServerChange,
-            onActorChange: handleActorChange,
-            onCommanderChange: handleCommanderChange,
-            onIdChange: handleIdChange, 
-            onCollapseChange: handleCollapseChange,
-            onVersionChange: handleVersionChange,
-            agentId: editorSelectedAgentId
-          }
-      }));
+      const hydratedNodes = rfData.nodes.map(n => {
+          const data = n.data as any;
+          const parameterCount = data.parameterDefs?.length || 0;
+          const shouldCollapse = parameterCount > 2;
+          
+          return {
+            ...n,
+            data: { 
+              ...data, 
+              collapsed: data.collapsed !== undefined ? data.collapsed : shouldCollapse,
+              onParameterChange: handleParameterChange, 
+              onClientChange: handleClientChange,
+              onServerChange: handleServerChange,
+              onActorChange: handleActorChange,
+              onCommanderChange: handleCommanderChange,
+              onIdChange: handleIdChange, 
+              onCollapseChange: handleCollapseChange,
+              onVersionChange: handleVersionChange,
+              agentId: editorSelectedAgentId
+            }
+          };
+      });
       setNodes(hydratedNodes);
       setEdges(rfData.edges);
       setConfig(originalDataflow.config || { name: (originalDataflow as any).name || 'untitled', description: (originalDataflow as any).description || '' });
@@ -952,7 +961,8 @@ export const DataflowEditor: React.FC<{
       let hydratedNodes = rfData.nodes.map(n => {
           const data = n.data as any;
           const parameterCount = data.parameterDefs?.length || 0;
-          // 如果参数大于 2 个，且没有明确指定不折叠，则默认折叠
+          
+          // 尊重数据中已有的折叠状态，仅在状态缺失时根据参数数量进行默认折叠
           const shouldCollapse = parameterCount > 2;
           
           return {
@@ -1046,7 +1056,7 @@ export const DataflowEditor: React.FC<{
         setHighlightedNodeId(null);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeDataflow, urlParamName]); 
+  }, [activeDataflow, urlParamName, allCapabilities]); 
 
     // --- Telemetry Loop ---
     useEffect(() => {
@@ -1338,10 +1348,30 @@ export const DataflowEditor: React.FC<{
     }, [addNode, screenToFlowPosition, readOnly]);
 
   const onLayout = useCallback(async () => {
-    const layoutedNodes = await getLayoutedElements(nodes, edges);
+    // 优化排布清晰度：若参数 > 2，则默认折叠以减少视觉复杂度
+    const nodesToLayout = nodes.map(node => {
+      const data = node.data as any;
+      let parameterCount = data.parameterDefs?.length || 0;
+      
+      if (parameterCount === 0 && allCapabilities) {
+        const cap = allCapabilities[data.label];
+        if (cap && cap.parameters) {
+          parameterCount = cap.parameters.length;
+        }
+      }
+
+      // 仅在执行自动排布动作时，对参数较多的节点进行折叠优化，以确保拓扑清晰
+      // 注意：这里我们只在 layout 计算前临时改变状态，或者如果用户希望这就是 layout 的副作用
+      if (parameterCount > 2) {
+        return { ...node, data: { ...node.data, collapsed: true } };
+      }
+      return node;
+    });
+
+    const layoutedNodes = await getLayoutedElements(nodesToLayout, edges);
     setNodes(layoutedNodes);
     setTimeout(() => fitView({ duration: 800 }), 10);
-  }, [nodes, edges, setNodes, fitView]);
+  }, [nodes, edges, setNodes, fitView, allCapabilities]);
 
   // Click outside to close search
   useEffect(() => {

@@ -126,6 +126,9 @@ export const dataflowToReactFlow = (flow: Dataflow, agentCapabilities?: any) => 
         });
     }
 
+    const parameterCount = paramsDef.length;
+    const shouldCollapse = parameterCount > 2;
+
     nodes.push({
       id: id,
       type: 'custom',
@@ -160,7 +163,7 @@ export const dataflowToReactFlow = (flow: Dataflow, agentCapabilities?: any) => 
         onCollapseChange: () => {}, 
         onVersionChange: () => {},
         
-        collapsed: n.collapsed || false,
+        collapsed: n.collapsed !== undefined ? n.collapsed : shouldCollapse,
         isUnsupported: false 
       },
     });
