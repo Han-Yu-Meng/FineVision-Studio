@@ -24,8 +24,8 @@ import { INITIAL_CAPABILITIES } from '../services/mockData';
 import { packageService } from '../services/packageService';
 import { Loader2 } from 'lucide-react';
 import { useNavigate, useBeforeUnload, useParams } from 'react-router-dom';
-import dagre from 'dagre';
 import { dataflowToReactFlow, reactFlowToDataflow, normalizeDataflow, getMatchScore, generatePythonLaunch } from '../utils/dataflowUtils';
+import { getLayoutedElements } from '../utils/elkLayout';
 
 // Sub-components
 import { EditorSidebar } from '../components/editor/EditorSidebar';
@@ -976,74 +976,22 @@ export const DataflowEditor: React.FC<{
       // 自动布局检查：如果所有节点都在 (0,0) 或位置缺失，则调用自动排布
       const needsLayout = hydratedNodes.length > 0 && hydratedNodes.every(n => n.position.x === 0 && n.position.y === 0);
       if (needsLayout) {
-          const dagreGraph = new dagre.graphlib.Graph();
-          dagreGraph.setDefaultEdgeLabel(() => ({}));
-          
-          const DEFAULT_WIDTH = 300;
-          const DEFAULT_HEIGHT = 200;
-          const COLLAPSED_HEIGHT = 60;
-
-          dagreGraph.setGraph({ 
-              rankdir: 'LR', 
-              nodesep: 100, // 初始加载时使用更大的间距以确保不重叠
-              ranksep: 150 
+          getLayoutedElements(hydratedNodes, rfData.edges).then(layoutedNodes => {
+              setNodes(layoutedNodes);
+              resetHistory(layoutedNodes, rfData.edges);
+              setTimeout(() => fitView({ padding: 0.2, duration: 0 }), 100);
           });
-          
-          hydratedNodes.forEach((node) => {
-              // 初始加载时没有测量高度，根据数据项数量估算高度
-              const data = node.data as any;
-              let estimatedHeight = COLLAPSED_HEIGHT;
-              
-              if (!data.collapsed) {
-                const rowCount = Math.max(
-                    (data.inputs?.length || 0),
-                    (data.outputs?.length || 0),
-                    (data.parameterDefs?.length || 0)
-                );
-                estimatedHeight = Math.max(DEFAULT_HEIGHT, 100 + rowCount * 30);
-              }
-              
-              dagreGraph.setNode(node.id, { width: DEFAULT_WIDTH, height: estimatedHeight });
-          });
-          rfData.edges.forEach((edge) => {
-              dagreGraph.setEdge(edge.source, edge.target);
-          });
-          
-          dagre.layout(dagreGraph);
-          
-          hydratedNodes = hydratedNodes.map((node) => {
-              const nodeWithPosition = dagreGraph.node(node.id);
-              // 获取对应的估算高度以计算中心偏置
-              const data = node.data as any;
-              let estimatedHeight = COLLAPSED_HEIGHT;
-              
-              if (!data.collapsed) {
-                const rowCount = Math.max(
-                    (data.inputs?.length || 0),
-                    (data.outputs?.length || 0),
-                    (data.parameterDefs?.length || 0)
-                );
-                estimatedHeight = Math.max(DEFAULT_HEIGHT, 100 + rowCount * 30);
-              }
-
-              return { 
-                  ...node, 
-                  position: { 
-                      x: nodeWithPosition.x - DEFAULT_WIDTH / 2, 
-                      y: nodeWithPosition.y - estimatedHeight / 2 
-                  } 
-              };
-          });
+      } else {
+          setNodes(hydratedNodes);
+          resetHistory(hydratedNodes, rfData.edges);
+          setTimeout(() => fitView({ padding: 0.2, duration: 0 }), 100);
       }
 
-      setNodes(hydratedNodes);
       setEdges(rfData.edges);
       // originalDataflow is always the saved version (not working copy)
       // Ensure originalDataflow has the same normalized config as dataflowToLoad
       setOriginalDataflow(normalizedDataflow);
-      resetHistory(hydratedNodes, rfData.edges);
       setHighlightedNodeId(null); // Reset selection on load
-      setTimeout(() => fitView({ padding: 0.2, duration: 0 }), 100);
       
       // Check compilation status for all packages in the dataflow
       const packageIds = new Set<string>();
@@ -1389,57 +1337,8 @@ export const DataflowEditor: React.FC<{
       addNode(funcName, screenToFlowPosition({ x: event.clientX, y: event.clientY }));
     }, [addNode, screenToFlowPosition, readOnly]);
 
-  const onLayout = useCallback(() => {
-    const dagreGraph = new dagre.graphlib.Graph();
-    dagreGraph.setDefaultEdgeLabel(() => ({}));
-    
-    // 默认节点尺寸，如果无法获取测量尺寸则使用
-    const DEFAULT_WIDTH = 300;
-    const DEFAULT_HEIGHT = 200;
-
-    dagreGraph.setGraph({ 
-        rankdir: 'LR', 
-        nodesep: 80, // 增加节点间的纵向间距
-        ranksep: 120 // 增加层级间的横向间距
-    });
-
-    nodes.forEach((node) => {
-        // 优先使用 ReactFlow 测量出的实际尺寸，如果没有（比如刚加载还没渲染）则使用估算尺寸
-        const width = node.measured?.width ?? DEFAULT_WIDTH;
-        let height = node.measured?.height ?? DEFAULT_HEIGHT;
-        
-        // 如果没有测量高度，尝试根据数据量简单估算一个高度
-        if (!node.measured?.height) {
-            const data = node.data as any;
-            const rowCount = Math.max(
-                (data.inputs?.length || 0),
-                (data.outputs?.length || 0),
-                (data.parameterDefs?.length || 0)
-            );
-            height = Math.max(DEFAULT_HEIGHT, 100 + rowCount * 30);
-        }
-
-        dagreGraph.setNode(node.id, { width, height });
-    });
-
-    edges.forEach((edge) => dagreGraph.setEdge(edge.source, edge.target));
-    
-    dagre.layout(dagreGraph);
-
-    const layoutedNodes = nodes.map((node) => {
-      const nodeWithPosition = dagreGraph.node(node.id);
-      const width = node.measured?.width ?? DEFAULT_WIDTH;
-      const height = node.measured?.height ?? DEFAULT_HEIGHT;
-
-      return { 
-          ...node, 
-          position: { 
-              x: nodeWithPosition.x - width / 2, 
-              y: nodeWithPosition.y - height / 2 
-          } 
-      };
-    });
-
+  const onLayout = useCallback(async () => {
+    const layoutedNodes = await getLayoutedElements(nodes, edges);
     setNodes(layoutedNodes);
     setTimeout(() => fitView({ duration: 800 }), 10);
   }, [nodes, edges, setNodes, fitView]);
