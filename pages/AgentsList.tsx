@@ -182,16 +182,23 @@ export const AgentsList: React.FC = () => {
             </div>
             
             <section>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 pb-6">
-                {sortedAgentIds.map((agentId) => (
-                    <AgentCard 
-                        key={agentId} 
-                        agentId={agentId} 
-                        pendingStatus={pendingOperations[agentId]} 
-                        handleSetStatus={handleSetStatus} 
-                    />
-                ))}
-              </div>
+              {sortedAgentIds.length > 0 ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 pb-6">
+                  {sortedAgentIds.map((agentId) => (
+                      <AgentCard 
+                          key={agentId} 
+                          agentId={agentId} 
+                          pendingStatus={pendingOperations[agentId]} 
+                          handleSetStatus={handleSetStatus} 
+                      />
+                  ))}
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center py-32 opacity-50">
+                    <WifiOff className="text-slate-400 dark:text-slate-600 mb-4" size={64} strokeWidth={1.5} />
+                    <h3 className="text-xl font-medium text-slate-500 dark:text-slate-400">No Agents Connected</h3>
+                </div>
+              )}
             </section>
         </div>
     </div>
