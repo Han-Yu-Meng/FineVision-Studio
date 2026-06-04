@@ -17,10 +17,10 @@ export const AgentDetails = () => {
     const pid = agent?.pid || 0;
     
     useEffect(() => {
+        let timeout: NodeJS.Timeout;
+        
         const initAgentDetails = async () => {
-            if (id) {
-                setIsLoading(true);
-                
+            if (id && agent) {
                 // 设置当前选中的 Agent ID 供 DataflowEditor 使用
                 setEditorSelectedAgentId(id);
 
@@ -35,10 +35,18 @@ export const AgentDetails = () => {
                 }
                 
                 setIsLoading(false);
+            } else if (id && agents.length > 0 && !agent) {
+                // 如果列表已加载但没找到该 agent，等待一会再标记加载完成（可能还在同步中）
+                timeout = setTimeout(() => {
+                    setIsLoading(false);
+                }, 2000);
             }
         };
         initAgentDetails();
-    }, [id, getAgentDataflow, loadDataflow, setEditorSelectedAgentId]);
+        return () => {
+            if (timeout) clearTimeout(timeout);
+        };
+    }, [id, agent?.id, agents.length, getAgentDataflow, loadDataflow, setEditorSelectedAgentId]);
 
     const handleStop = async () => {
         if (!id) return;
@@ -62,7 +70,47 @@ export const AgentDetails = () => {
 
     return (
         <div className="h-full flex flex-col bg-slate-50 dark:bg-slate-950">
-            {/* Main Content: Reusing DataflowEditor */}
+            {/* Header: Simplified UI as before */}
+            <div className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-4 py-3 flex items-center justify-between shadow-sm z-10">
+                <div className="flex items-center gap-4">
+                    <button 
+                        onClick={() => navigate('/agents')}
+                        className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors text-slate-500"
+                    >
+                        <ArrowLeft size={20} />
+                    </button>
+                    <div>
+                        <div className="flex items-center gap-2">
+                            <h1 className="text-lg font-bold text-slate-900 dark:text-white">{id}</h1>
+                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
+                                isRunning ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
+                            }`}>
+                                {isRunning ? 'RUNNING' : 'ONLINE'}
+                            </span>
+                        </div>
+                        <div className="flex items-center gap-4 mt-0.5 text-xs text-slate-500">
+                            <div className="flex items-center gap-1">
+                                <Monitor size={12} />
+                                <span>PID: {pid || 'N/A'}</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="flex items-center gap-3">
+                    {isRunning && (
+                        <button 
+                            onClick={handleStop}
+                            className="flex items-center gap-2 bg-red-50 hover:bg-red-100 dark:bg-red-900/20 dark:hover:bg-red-900/30 text-red-600 dark:text-red-400 px-4 py-2 rounded-lg font-medium transition-colors border border-red-200 dark:border-red-900/50"
+                        >
+                            <StopCircle size={18} />
+                            Stop Agent
+                        </button>
+                    )}
+                </div>
+            </div>
+
+            {/* Main Content: Reusing DataflowEditor with its internal subscription */}
             <div className="flex-1 overflow-hidden relative">
                 <ReactFlowProvider>
                     <DataflowEditor initialAgentId={id} hideSidebar={true} />

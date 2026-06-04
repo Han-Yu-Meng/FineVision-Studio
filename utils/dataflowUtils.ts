@@ -100,7 +100,7 @@ export const dataflowToReactFlow = (flow: Dataflow, agentCapabilities?: any) => 
                         target: id,
                         targetHandle: targetHandle,
                         animated: true,
-                        type: 'default',
+                        type: 'custom',
                         data: {
                             queue,
                             priority

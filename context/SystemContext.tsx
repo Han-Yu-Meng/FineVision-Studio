@@ -259,21 +259,26 @@ export const SystemProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 }
             }
 
-            const mergedNodeMetrics: NodeMetrics = { ...newAgent.nodeMetrics };
-            Object.keys(mergedNodeMetrics).forEach(nodeId => {
-                const newLogs = mergedNodeMetrics[nodeId].logs || [];
-                const oldLogs = oldAgent.nodeMetrics[nodeId]?.logs || [];
-                if (newLogs.length > 0) {
-                    mergedNodeMetrics[nodeId].logs = mergeLogs(oldLogs, newLogs);
-                } else if (oldLogs.length > 0) {
-                    mergedNodeMetrics[nodeId].logs = oldLogs;
-                }
-            });
-            Object.keys(oldAgent.nodeMetrics).forEach(nodeId => {
-                if (!mergedNodeMetrics[nodeId]) {
-                    mergedNodeMetrics[nodeId] = oldAgent.nodeMetrics[nodeId];
-                }
-            });
+            // FULL MERGE of Node Metrics: Start with old data to prevent loss
+            const mergedNodeMetrics: NodeMetrics = { ...(oldAgent.nodeMetrics || {}) };
+            
+            // Apply new/updated metrics
+            if (newAgent.nodeMetrics) {
+                Object.keys(newAgent.nodeMetrics).forEach(nodeId => {
+                    const newNodeData = newAgent.nodeMetrics[nodeId];
+                    const oldNodeData = mergedNodeMetrics[nodeId] || { logs: [] };
+                    
+                    const newLogs = newNodeData.logs || [];
+                     const oldLogs = oldNodeData.logs || [];
+ 
+                     mergedNodeMetrics[nodeId] = {
+                         ...oldNodeData,
+                         metrics: newNodeData.metrics || oldNodeData.metrics,
+                         logs: newLogs.length > 0 ? mergeLogs(oldLogs, newLogs) : oldLogs
+                     };
+                });
+            }
+
             mergedAgent = {
                 ...newAgent,
                 nodeMetrics: mergedNodeMetrics,
@@ -334,17 +339,20 @@ export const SystemProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 const oldA = prev.find(a => a.id === newA.id);
                 if (!oldA) return newA;
                 
-                const mergedNodeMetrics: NodeMetrics = { ...newA.nodeMetrics };
-                Object.keys(mergedNodeMetrics).forEach(nodeId => {
-                    const newLogs = mergedNodeMetrics[nodeId].logs || [];
-                    const oldLogs = oldA.nodeMetrics[nodeId]?.logs || [];
-                    if (newLogs.length > 0) mergedNodeMetrics[nodeId].logs = mergeLogs(oldLogs, newLogs);
-                    else if (oldLogs.length > 0) mergedNodeMetrics[nodeId].logs = oldLogs;
-                });
-                
-                Object.keys(oldA.nodeMetrics).forEach(nodeId => {
-                    if (!mergedNodeMetrics[nodeId]) mergedNodeMetrics[nodeId] = oldA.nodeMetrics[nodeId];
-                });
+                // Use the same FULL MERGE logic for state updates
+                const mergedNodeMetrics: NodeMetrics = { ...(oldA.nodeMetrics || {}) };
+                if (newA.nodeMetrics) {
+                    Object.keys(newA.nodeMetrics).forEach(nodeId => {
+                        const newNodeData = newA.nodeMetrics[nodeId];
+                        const oldNodeData = mergedNodeMetrics[nodeId] || { logs: [] };
+                        
+                        mergedNodeMetrics[nodeId] = {
+                            ...oldNodeData,
+                            metrics: newNodeData.metrics || oldNodeData.metrics,
+                            logs: newNodeData.logs?.length ? mergeLogs(oldNodeData.logs || [], newNodeData.logs) : (oldNodeData.logs || [])
+                        };
+                    });
+                }
 
                 return { ...newA, nodeMetrics: mergedNodeMetrics };
             });

@@ -28,7 +28,26 @@ export const NodeLogs: React.FC = () => {
 
     const logs = useMemo(() => {
         if (!agent || !agent.nodeMetrics || !nodeId || !agentId) return [];
-        const fullLogs = agent.nodeMetrics[nodeId]?.logs || [];
+        
+        // --- ID Matching Strategy (consistent with Editor.tsx) ---
+        // 1. Exact match
+        let nodeMetric = agent.nodeMetrics[nodeId];
+        
+        // 2. Fuzzy match by prefix
+        if (!nodeMetric) {
+            const metricKeys = Object.keys(agent.nodeMetrics);
+            const prefix = nodeId.includes('_') ? nodeId.split('_')[0] + "_" : nodeId;
+            const fuzzyKey = metricKeys.find(key => 
+                key === nodeId || 
+                key.startsWith(prefix)
+            );
+            if (fuzzyKey) {
+                console.log(`[NodeLogs] Fuzzy matched ${nodeId} to ${fuzzyKey}`);
+                nodeMetric = agent.nodeMetrics[fuzzyKey];
+            }
+        }
+
+        const fullLogs = nodeMetric?.logs || [];
         
         const clearTimestamp = getAgentClearTimestamp(agentId);
         

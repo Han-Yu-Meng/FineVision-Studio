@@ -314,7 +314,7 @@ export const CustomNode = memo(({ id: reactFlowId, data, selected }: NodeProps) 
                                             {renderKaTeX(client.name)}
                                         </span>
                                     </div>
-                                    <ServiceBadge reqType={client.request_type} resType={client.response_type} />
+                                    <ServiceBadge request={client.request_type} response={client.response_type} />
                                 </div>
                                 <div className="flex items-center gap-1">
                                     <input 
@@ -336,7 +336,7 @@ export const CustomNode = memo(({ id: reactFlowId, data, selected }: NodeProps) 
                                             {renderKaTeX(server.name)}
                                         </span>
                                     </div>
-                                    <ServiceBadge reqType={server.request_type} resType={server.response_type} />
+                                    <ServiceBadge request={server.request_type} response={server.response_type} />
                                 </div>
                                 <div className="flex items-center gap-1">
                                     <input 
@@ -358,7 +358,7 @@ export const CustomNode = memo(({ id: reactFlowId, data, selected }: NodeProps) 
                                             {renderKaTeX(actor.name)}
                                         </span>
                                     </div>
-                                    <ActionBadge goalType={actor.goal_type} feedbackType={actor.feedback_type} />
+                                    <ActionBadge goal={actor.goal_type} feedback={actor.feedback_type} />
                                 </div>
                                 <div className="flex items-center gap-1">
                                     <input 
@@ -380,7 +380,7 @@ export const CustomNode = memo(({ id: reactFlowId, data, selected }: NodeProps) 
                                             {renderKaTeX(commander.name)}
                                         </span>
                                     </div>
-                                    <ActionBadge goalType={commander.goal_type} feedbackType={commander.feedback_type} />
+                                    <ActionBadge goal={commander.goal_type} feedback={commander.feedback_type} />
                                 </div>
                                 <div className="flex items-center gap-1">
                                     <input 

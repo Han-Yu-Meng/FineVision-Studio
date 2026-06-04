@@ -19,7 +19,7 @@ import {
 import { useSystem, useAgentMetrics } from '../context/SystemContext';
 import { CustomNode } from '../components/CustomNode';
 import { CustomEdge } from '../components/CustomEdge';
-import { AgentStatus, Dataflow, AgentCapabilities, Capability } from '../types';
+import { AgentStatus, Dataflow, AgentCapabilities, Capability, Agent } from '../types';
 import { INITIAL_CAPABILITIES } from '../services/mockData';
 import { packageService } from '../services/packageService';
 import { Loader2 } from 'lucide-react';
@@ -44,10 +44,14 @@ const nodeTypes = {
 };
 
 const edgeTypes = {
-  default: CustomEdge,
+  custom: CustomEdge,
 };
 
-export const DataflowEditor: React.FC<{ initialAgentId?: string, hideSidebar?: boolean }> = ({ initialAgentId, hideSidebar = false }) => {
+export const DataflowEditor: React.FC<{ 
+  initialAgentId?: string, 
+  hideSidebar?: boolean,
+  agent?: Agent 
+}> = ({ initialAgentId, hideSidebar = false, agent: propsAgent }) => {
   const { 
     agents, 
     dataflows,
@@ -104,7 +108,9 @@ export const DataflowEditor: React.FC<{ initialAgentId?: string, hideSidebar?: b
       }
   }, [agents, editorSelectedAgentId, setEditorSelectedAgentId, initialAgentId]);
 
-  const realtimeAgent = useAgentMetrics(editorSelectedAgentId);
+  const hookRealtimeAgent = useAgentMetrics(editorSelectedAgentId);
+  const realtimeAgent = propsAgent || hookRealtimeAgent;
+  const effectiveAgentId = realtimeAgent?.id || editorSelectedAgentId;
 
   useEffect(() => {
       setSidebarCollapsed(true);
@@ -834,7 +840,7 @@ export const DataflowEditor: React.FC<{ initialAgentId?: string, hideSidebar?: b
           setEdges((eds) => addEdge({ 
               ...params, 
               animated: true, 
-              type: 'default', 
+              type: 'custom', 
               data: edgeData
           }, eds));
           
@@ -1091,77 +1097,152 @@ export const DataflowEditor: React.FC<{ initialAgentId?: string, hideSidebar?: b
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeDataflow, urlParamName]); 
 
-  // --- Telemetry Loop ---
+    // --- Telemetry Loop ---
     useEffect(() => {
-        if (!realtimeAgent) return;
+        if (!realtimeAgent || !effectiveAgentId) {
+            return;
+        }
 
         // Get the clear timestamp for this agent
-        const clearTimestamp = getAgentClearTimestamp(editorSelectedAgentId);
+        const clearTimestamp = getAgentClearTimestamp(effectiveAgentId);
         const timeSinceLastClear = Date.now() - clearTimestamp;
         const recentlyClearedMetrics = timeSinceLastClear < 2000;
 
+        if (recentlyClearedMetrics) {
+            return;
+        }
+
+        const metricsMap = realtimeAgent.nodeMetrics || (realtimeAgent as any).node_metrics || {};
+        const pipeMetricsMap = realtimeAgent.pipeMetrics || (realtimeAgent as any).pipe_metrics || {};
+
+        const metricKeys = Object.keys(metricsMap);
+
         // 1. Update Nodes (Logs & Metrics)
-        setNodes(nds => nds.map(node => {
-            const userId = node.data.user_id as string;
-            const metricsMap = realtimeAgent.nodeMetrics || (realtimeAgent as any).node_metrics || {};
-            const nodeMetric = metricsMap[userId];
-            
-            if (nodeMetric && !recentlyClearedMetrics) {
-                // Filter logs based on clear timestamp
-                const incomingLogs = nodeMetric.logs || [];
-                const filteredLogs = incomingLogs.filter((log: any) => {
-                    const logTime = log.timestamp * 1000; // Convert to milliseconds
-                    return logTime > clearTimestamp;
-                });
-
-                // Use the last 20 filtered logs for visual display in Editor
-                const recentLogs = filteredLogs.slice(-20);
-                
-                return { 
-                    ...node, 
-                    data: { 
-                        ...node.data, 
-                        metrics: nodeMetric.metrics || node.data.metrics, 
-                        logs: recentLogs // Keep Editor lightweight with filtered logs
-                    } 
-                };
+        setNodes(nds => {
+            if (!nds || nds.length === 0) {
+                return nds;
             }
-            return node;
-        }));
-
-        // 2. Update Edges (Pipe Metrics) OR Clear them if stopped
-        if (realtimeAgent.status === AgentStatus.RUNNING && !recentlyClearedMetrics) {
-            setEdges(eds => {
-                // Get current nodes from the closure - we need to be careful here
-                // Use getNodes() from useReactFlow instead
-                const currentNodes = getNodes();
+            
+            let changed = false;
+            const newNodes = nds.map(node => {
+                const userId = node.data.user_id as string;
+                const label = node.data.label as string;
                 
-                return eds.map(edge => {
-                    const sourceNode = currentNodes.find(n => n.id === edge.source);
-                    const targetNode = currentNodes.find(n => n.id === edge.target);
-                    const sourceId = (sourceNode?.data.user_id as string) || edge.source;
-                    const targetId = (targetNode?.data.user_id as string) || edge.target;
-                    const pipeKey = `${sourceId}/${edge.sourceHandle}->${targetId}/${edge.targetHandle}`;
-                    const metric = realtimeAgent.pipeMetrics?.[pipeKey];
+                // --- ID Matching Strategy ---
+                // 1. Exact match (Priority)
+                let nodeMetric = metricsMap[userId] || metricsMap[node.id];
+                
+                // 2. Fuzzy match by prefix (Fallback for dynamic IDs)
+                if (!nodeMetric) {
+                    const fuzzyKey = metricKeys.find(key => 
+                        key === label || 
+                        key.startsWith(label + "_") || 
+                        (userId.includes("_") && key.startsWith(userId.split("_")[0] + "_"))
+                    );
+                    if (fuzzyKey) {
+                        nodeMetric = metricsMap[fuzzyKey];
+                    }
+                }
+                
+                if (nodeMetric) {
+                    const incomingLogs = nodeMetric.logs || [];
+                    const filteredLogs = incomingLogs.filter((log: any) => {
+                        const logTime = log.timestamp * 1000;
+                        return logTime > clearTimestamp;
+                    });
+                    const recentLogs = filteredLogs.slice(-20);
+                    
+                    // Update if metrics changed or logs count changed
+                    const metricsChanged = JSON.stringify(node.data.metrics) !== JSON.stringify(nodeMetric.metrics);
+                    const logsChanged = (node.data.logs?.length || 0) !== recentLogs.length;
+
+                    if (metricsChanged || logsChanged) {
+                        changed = true;
+                        return { 
+                            ...node, 
+                            data: { 
+                                ...node.data, 
+                                metrics: nodeMetric.metrics || node.data.metrics, 
+                                logs: recentLogs 
+                            } 
+                        };
+                    }
+                }
+                return node;
+            });
+            return changed ? newNodes : nds;
+        });
+
+        // 2. Update Edges (Pipe Metrics)
+        if (realtimeAgent.status === AgentStatus.RUNNING) {
+            setEdges(eds => {
+                if (!eds || eds.length === 0) return eds;
+                
+                let changed = false;
+                const pipeKeys = Object.keys(pipeMetricsMap);
+
+                const newEdges = eds.map(edge => {
+                    const sourceId = edge.source;
+                    const targetId = edge.target;
+                    const sourceHandle = edge.sourceHandle;
+                    const targetHandle = edge.targetHandle;
+
+                    // 1. Exact match
+                    const exactPipeKey = `${sourceId}/${sourceHandle}->${targetId}/${targetHandle}`;
+                    let metric = pipeMetricsMap[exactPipeKey];
+
+                    // 2. Fuzzy match (match prefixes of IDs)
+                    if (!metric && pipeKeys.length > 0) {
+                        const sourcePrefix = sourceId.includes('_') ? sourceId.split('_')[0] : sourceId;
+                        const targetPrefix = targetId.includes('_') ? targetId.split('_')[0] : targetId;
+
+                        const fuzzyPipeKey = pipeKeys.find(key => {
+                            // Key format: "SrcID/SrcHandle->DstID/DstHandle"
+                            const [srcPart, dstPart] = key.split('->');
+                            if (!srcPart || !dstPart) return false;
+
+                            const [srcIdInKey, srcHandleInKey] = srcPart.split('/');
+                            const [dstIdInKey, dstHandleInKey] = dstPart.split('/');
+
+                            const srcMatches = srcHandleInKey === sourceHandle && 
+                                             (srcIdInKey === sourceId || srcIdInKey.startsWith(sourcePrefix + "_"));
+                            const dstMatches = dstHandleInKey === targetHandle && 
+                                             (dstIdInKey === targetId || dstIdInKey.startsWith(targetPrefix + "_"));
+
+                            return srcMatches && dstMatches;
+                        });
+
+                        if (fuzzyPipeKey) {
+                            metric = pipeMetricsMap[fuzzyPipeKey];
+                        }
+                    }
                     
                     if (metric) {
-                        if (edge.data?.fps !== metric.fps || edge.data?.delay !== metric.sys_delay_ms) {
-                            return { ...edge, data: { ...edge.data, fps: metric.fps, delay: metric.sys_delay_ms } };
+                        const delayVal = metric.sys_delay_ms !== undefined ? metric.sys_delay_ms : metric.avg_aoi_ms;
+                        if (edge.data?.fps !== metric.fps || edge.data?.delay !== delayVal) {
+                            changed = true;
+                            return { ...edge, data: { ...edge.data, fps: metric.fps, delay: delayVal } };
                         }
                     }
                     return edge;
                 });
+                return changed ? newEdges : eds;
             });
         } else {
-            // If not running (e.g. STOPPED, ONLINE, OFFLINE), clear visual metrics from edges
-            setEdges(eds => eds.map(edge => {
-                if (edge.data?.fps !== undefined || edge.data?.delay !== undefined) {
-                    return { ...edge, data: { ...edge.data, fps: undefined, delay: undefined } };
-                }
-                return edge;
-            }));
+            setEdges(eds => {
+                if (!eds || eds.length === 0) return eds;
+                let changed = false;
+                const newEdges = eds.map(edge => {
+                    if (edge.data?.fps !== undefined || edge.data?.delay !== undefined) {
+                        changed = true;
+                        return { ...edge, data: { ...edge.data, fps: undefined, delay: undefined } };
+                    }
+                    return edge;
+                });
+                return changed ? newEdges : eds;
+            });
         }
-    }, [realtimeAgent, editorSelectedAgentId, getAgentClearTimestamp]); // Remove nodes, setNodes, setEdges - they're stable or accessed via functional updates
+    }, [realtimeAgent, effectiveAgentId, getAgentClearTimestamp]); // Remove nodes, setNodes, setEdges - they're stable or accessed via functional updates
 
   // --- Compilation State Sync ---
   // Update nodes when compilation state changes

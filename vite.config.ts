@@ -144,10 +144,14 @@ const Studio = () => {
                     if (data.node_metrics) {
                         for (const [nodeId, metrics] of Object.entries(data.node_metrics)) {
                             const newLogs = (metrics as any).logs || [];
-                            const existingLogs = nodeMetrics[nodeId]?.logs || [];
-                            // Fix: Limit logs to 10,000 to prevent Socket.IO buffer overflow and disconnections
+                            const incomingMetrics = (metrics as any).metrics;
+                            const existingNode = nodeMetrics[nodeId] || { logs: [] };
+                            
+                            // Fix: Keep the metrics property while merging logs
                             nodeMetrics[nodeId] = {
-                                logs: [...existingLogs, ...newLogs].slice(-10000) 
+                                ...existingNode,
+                                metrics: incomingMetrics || existingNode.metrics,
+                                logs: [...existingNode.logs, ...newLogs].slice(-10000) 
                             };
                         }
                     }
