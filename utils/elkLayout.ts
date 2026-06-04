@@ -1,4 +1,4 @@
-import ELK, { ElkNode, ElkExtendedEdge } from 'elkjs/lib/elk.bundled.js';
+import ELK, { ElkNode, ElkExtendedEdge } from 'elkjs';
 import { Node, Edge } from '@xyflow/react';
 
 const elk = new ELK();
