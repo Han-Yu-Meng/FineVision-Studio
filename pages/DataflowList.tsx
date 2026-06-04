@@ -50,8 +50,9 @@ export const DataflowList: React.FC = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           <button 
             onClick={() => {
-              loadDataflow({ config: { name: `NewFlow_${Date.now().toString().slice(-4)}`, description: "New dataflow description" }, nodes: [] });
-              navigate('/editor');
+              const newName = `NewFlow_${Date.now().toString().slice(-4)}`;
+              loadDataflow({ config: { name: newName, description: "New dataflow description" }, nodes: [] });
+              navigate(`/editor/${newName}`);
             }}
             className="border-2 border-dashed border-slate-300 dark:border-slate-800 rounded-xl p-5 hover:border-purple-500/30 hover:bg-slate-50 dark:hover:bg-slate-900/50 transition-all flex flex-col items-center justify-center text-slate-500 gap-2 min-h-[160px]"
           >
@@ -92,7 +93,7 @@ export const DataflowList: React.FC = () => {
 
               <div onClick={() => {
                 loadDataflow(flow);
-                navigate('/editor');
+                navigate(`/editor/${flow.config.name}`);
             }}>
                 <h4 className="font-bold text-lg text-slate-900 dark:text-white mb-1">{flow.config.name}</h4>
                 <p className="text-sm text-slate-500 dark:text-slate-400 mb-4 line-clamp-2">{flow.config.description || 'No description provided.'}</p>

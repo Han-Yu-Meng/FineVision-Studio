@@ -120,7 +120,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
                 <button 
                     onClick={handleSave} 
                     className="p-2 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors relative group" 
-                    title={isDirty ? "Save changes (auto-saved)" : "Save locally"}
+                    title={isDirty ? "Save changes" : "Save"}
                 >
                     <Save size={16} />
                     {isDirty && (

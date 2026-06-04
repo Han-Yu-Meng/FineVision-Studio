@@ -294,7 +294,7 @@ Response Format (JSON):`;
   const handleLoadToEditor = () => {
       if (generatedFlow) {
           loadDataflow(generatedFlow);
-          navigate('/editor');
+          navigate(`/editor/${generatedFlow.config.name}`);
       }
   };
 

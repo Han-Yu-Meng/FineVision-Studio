@@ -54,8 +54,9 @@ export const ParameterList: React.FC = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           <button 
             onClick={() => {
-                loadParameter({ name: `Param_${Date.now().toString().slice(-4)}`, content: '' });
-                navigate('/parameter-editor');
+                const newName = `Param_${Date.now().toString().slice(-4)}`;
+                loadParameter({ name: newName, content: '' });
+                navigate(`/parameter-editor/${newName}`);
             }}
             className="border-2 border-dashed border-slate-300 dark:border-slate-800 rounded-xl p-5 hover:border-orange-500/30 hover:bg-slate-50 dark:hover:bg-slate-900/50 transition-all flex flex-col items-center justify-center text-slate-500 gap-2 min-h-[160px]"
           >
@@ -84,7 +85,7 @@ export const ParameterList: React.FC = () => {
 
               <div onClick={() => {
                 loadParameter(param);
-                navigate('/parameter-editor');
+                navigate(`/parameter-editor/${param.name}`);
             }}>
                 <div className="flex items-center gap-2 mb-2">
                     <FileText size={16} className="text-orange-500 dark:text-orange-400" />

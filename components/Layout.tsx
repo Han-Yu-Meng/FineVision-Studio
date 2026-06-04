@@ -90,7 +90,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
     if (exact) return location.pathname === path;
     
     if (path === '/agents') {
-        return location.pathname === '/agents' || location.pathname === '/create-agent' || location.pathname.startsWith('/agent/');
+        return location.pathname === '/agents' || location.pathname.startsWith('/agent/');
     }
     if (path === '/dataflows') {
         return location.pathname === '/dataflows' || location.pathname.startsWith('/editor') || location.pathname.startsWith('/logs');

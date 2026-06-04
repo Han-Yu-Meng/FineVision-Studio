@@ -183,15 +183,6 @@ export const AgentsList: React.FC = () => {
             
             <section>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 pb-6">
-                {/* Create New Agent Card */}
-                <button 
-                  onClick={() => navigate('/create-agent')}
-                  className="border-2 border-dashed border-slate-300 dark:border-slate-800 rounded-xl p-5 hover:border-blue-500/30 hover:bg-slate-50 dark:hover:bg-slate-900/50 transition-all flex flex-col items-center justify-center text-slate-500 gap-2 min-h-[160px]"
-                >
-                  <div className="w-12 h-12 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-2xl text-blue-500 dark:text-blue-400">+</div>
-                  <span className="font-medium">Create Local Agent</span>
-                </button>
-
                 {sortedAgentIds.map((agentId) => (
                     <AgentCard 
                         key={agentId} 

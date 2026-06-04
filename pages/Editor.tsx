@@ -23,7 +23,7 @@ import { AgentStatus, Dataflow, AgentCapabilities, Capability } from '../types';
 import { INITIAL_CAPABILITIES } from '../services/mockData';
 import { packageService } from '../services/packageService';
 import { Loader2 } from 'lucide-react';
-import { useNavigate, useBeforeUnload } from 'react-router-dom';
+import { useNavigate, useBeforeUnload, useParams } from 'react-router-dom';
 import dagre from 'dagre';
 import { dataflowToReactFlow, reactFlowToDataflow, normalizeDataflow, getMatchScore, generatePythonLaunch } from '../utils/dataflowUtils';
 
@@ -50,7 +50,9 @@ const edgeTypes = {
 const EditorContent: React.FC = () => {
   const { 
     agents, 
+    dataflows,
     activeDataflow, 
+    loadDataflow,
     saveDataflow, 
     deployDataflowToAgent, 
     setAgentState, 
@@ -67,7 +69,21 @@ const EditorContent: React.FC = () => {
   } = useSystem();
   
   const navigate = useNavigate();
+  const { name: urlParamNameEncoded } = useParams<{ name?: string }>();
+  const urlParamName = urlParamNameEncoded ? decodeURIComponent(urlParamNameEncoded) : undefined;
   const { screenToFlowPosition, getNode, fitView, getNodes, getEdges } = useReactFlow();
+
+  // 根据 URL 参数加载对应的 Dataflow
+  useEffect(() => {
+    if (urlParamName && dataflows.length > 0) {
+      if (!activeDataflow || activeDataflow.config.name !== urlParamName) {
+        const targetFlow = dataflows.find(f => f.config.name === urlParamName);
+        if (targetFlow) {
+          loadDataflow(targetFlow);
+        }
+      }
+    }
+  }, [urlParamName, dataflows, activeDataflow, loadDataflow]);
   
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
@@ -971,6 +987,10 @@ const EditorContent: React.FC = () => {
         }
       });
     } else {
+        // 如果 URL 中有名称，但 activeDataflow 还没加载（可能正在从 backend 获取 dataflows）
+        // 则先不初始化为空，避免覆盖即将加载的数据
+        if (urlParamName) return;
+
         const newConfig = { name: `Flow_${Date.now().toString().slice(-4)}`, description: '' };
         setConfig(newConfig);
         setNodes([]);
@@ -980,7 +1000,7 @@ const EditorContent: React.FC = () => {
         setHighlightedNodeId(null);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); 
+  }, [activeDataflow, urlParamName]); 
 
   // --- Telemetry Loop ---
     useEffect(() => {

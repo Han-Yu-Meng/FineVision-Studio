@@ -16,7 +16,6 @@ import { PackageHub } from './pages/PackageHub';
 import { HubPackageDetail } from './pages/HubPackageDetail';
 import { PackageList } from './pages/PackageList';
 import { PackageDetail } from './pages/PackageDetail';
-import { CreateAgent } from './pages/CreateAgent';
 import { Timeline } from './pages/Timeline';
 
 const App: React.FC = () => {
@@ -27,7 +26,6 @@ const App: React.FC = () => {
           <Routes>
             <Route path="/" element={<Navigate to="/agents" replace />} />
             <Route path="/agents" element={<AgentsList />} />
-            <Route path="/create-agent" element={<CreateAgent />} />
             <Route path="/dataflows" element={<DataflowList />} />
             <Route path="/parameters" element={<ParameterList />} />
             <Route path="/packages" element={<PackageList />} />
@@ -35,12 +33,12 @@ const App: React.FC = () => {
             <Route path="/hub/package/:id" element={<HubPackageDetail />} />
             <Route path="/package/:source/:name" element={<PackageDetail />} />
             <Route path="/agent/:id" element={<AgentDetails />} />
-            <Route path="/editor" element={<Editor />} />
+            <Route path="/editor/:name?" element={<Editor />} />
             <Route path="/performance" element={<Performance />} />
             <Route path="/timeline" element={<Timeline />} />
             <Route path="/logs/:agentId/:nodeId" element={<NodeLogs />} />
             <Route path="/llm" element={<LLMPage />} />
-            <Route path="/parameter-editor" element={<ParameterEditor />} />
+            <Route path="/parameter-editor/:name?" element={<ParameterEditor />} />
             <Route path="*" element={<Navigate to="/agents" replace />} />
           </Routes>
         </Layout>

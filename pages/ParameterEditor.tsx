@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useSystem } from '../context/SystemContext';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { Save, UploadCloud, ArrowLeft, FileText, RefreshCw } from 'lucide-react';
 import Editor, { loader } from '@monaco-editor/react';
 import yaml from 'js-yaml';
@@ -20,13 +20,35 @@ interface ParamMeta {
 }
 
 export const ParameterEditor: React.FC = () => {
-  const { activeParameter, saveParameter, agents, deployParameterToAgent, theme, sendAgentCommand, addNotification } = useSystem();
+  const { 
+    parameters,
+    activeParameter, 
+    loadParameter,
+    saveParameter, 
+    agents, 
+    deployParameterToAgent, 
+    theme, 
+    sendAgentCommand, 
+    addNotification 
+  } = useSystem();
   const navigate = useNavigate();
+  const { name: urlParamNameEncoded } = useParams<{ name?: string }>();
+  const urlParamName = urlParamNameEncoded ? decodeURIComponent(urlParamNameEncoded) : undefined;
 
   const [name, setName] = useState('');
   const [content, setContent] = useState('');
   const [targetAgentId, setTargetAgentId] = useState<string>('');
   const [isFetchingRemote, setIsFetchingRemote] = useState(false);
+
+  // 根据 URL 参数加载对应的参数配置
+  useEffect(() => {
+    if (urlParamName && (!activeParameter || activeParameter.name !== urlParamName)) {
+      const targetParam = parameters.find(p => p.name === urlParamName);
+      if (targetParam) {
+        loadParameter(targetParam);
+      }
+    }
+  }, [urlParamName, parameters, activeParameter, loadParameter]);
 
   const templateMetaRef = useRef<Map<string, ParamMeta>>(new Map());
   const templateRootsRef = useRef<Set<string>>(new Set());
@@ -434,7 +456,6 @@ export const ParameterEditor: React.FC = () => {
         const meta = templateMetaRef.current.get(fullPath);
         if (meta) {
           const contents: any[] = [
-            { value: `**Path:** \`${fullPath}\`` },
             { value: `**Type:** \`${meta.type}\`` }
           ];
           
