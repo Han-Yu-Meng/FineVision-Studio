@@ -589,7 +589,18 @@ export const CustomNode = memo(({ id: reactFlowId, data, selected }: NodeProps) 
   
   if (prevData.collapsed !== nextData.collapsed) return false;
   if (prevData.metrics !== nextData.metrics) return false;
-  if ((prevData.logs as any[])?.length !== (nextData.logs as any[])?.length) return false;
+  
+  const prevLogs = (prevData.logs as any[]) || [];
+  const nextLogs = (nextData.logs as any[]) || [];
+  if (prevLogs.length !== nextLogs.length) return false;
+  if (prevLogs.length > 0 && nextLogs.length > 0) {
+    const lastPrev = prevLogs[prevLogs.length - 1];
+    const lastNext = nextLogs[nextLogs.length - 1];
+    if (lastPrev.timestamp !== lastNext.timestamp || lastPrev.message !== lastNext.message) {
+      return false;
+    }
+  }
+
   if (prevData.highlightedPorts !== nextData.highlightedPorts) return false;
   
   if (prevData.currentParameterValues !== nextData.currentParameterValues) return false;

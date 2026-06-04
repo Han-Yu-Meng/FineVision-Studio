@@ -24,6 +24,7 @@ interface EditorToolbarProps {
   handleRevert: () => void;
   handleCompile: () => void; 
   isDirty: boolean; 
+  readOnly?: boolean;
 }
 
 export const EditorToolbar: React.FC<EditorToolbarProps> = ({
@@ -40,7 +41,8 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
   handleDeploy,
   handleRevert,
   handleCompile,
-  isDirty 
+  isDirty,
+  readOnly = false
 }) => {
   const [showRevertButton, setShowRevertButton] = React.useState(false);
   
@@ -112,37 +114,39 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
                 <LayoutTemplate size={16} />
             </button>
             
-            <div 
-                className="relative"
-                onMouseEnter={() => isDirty && setShowRevertButton(true)}
-                onMouseLeave={() => setShowRevertButton(false)}
-            >
-                <button 
-                    onClick={handleSave} 
-                    className="p-2 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors relative group" 
-                    title={isDirty ? "Save changes" : "Save"}
+            {!readOnly && (
+                <div 
+                    className="relative"
+                    onMouseEnter={() => isDirty && setShowRevertButton(true)}
+                    onMouseLeave={() => setShowRevertButton(false)}
                 >
-                    <Save size={16} />
-                    {isDirty && (
-                        <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full border border-white dark:border-slate-900 animate-pulse"></span>
-                    )}
-                </button>
-                
-                {/* Revert Button - appears below on hover */}
-                {showRevertButton && isDirty && (
-                    <button
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            handleRevert();
-                            setShowRevertButton(false);
-                        }}
-                        className="absolute top-full mt-1 left-0 p-2 text-orange-600 dark:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-900/20 rounded-lg transition-colors animate-in fade-in slide-in-from-top-2 duration-200 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-lg z-50"
-                        title="Revert to saved version"
+                    <button 
+                        onClick={handleSave} 
+                        className="p-2 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors relative group" 
+                        title={isDirty ? "Save changes" : "Save"}
                     >
-                        <Undo2 size={16} />
+                        <Save size={16} />
+                        {isDirty && (
+                            <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full border border-white dark:border-slate-900 animate-pulse"></span>
+                        )}
                     </button>
-                )}
-            </div>
+                    
+                    {/* Revert Button - appears below on hover */}
+                    {showRevertButton && isDirty && (
+                        <button
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                handleRevert();
+                                setShowRevertButton(false);
+                            }}
+                            className="absolute top-full mt-1 left-0 p-2 text-orange-600 dark:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-900/20 rounded-lg transition-colors animate-in fade-in slide-in-from-top-2 duration-200 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-lg z-50"
+                            title="Revert to saved version"
+                        >
+                            <Undo2 size={16} />
+                        </button>
+                    )}
+                </div>
+            )}
 
             <button onClick={handleDownload} className="p-2 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors" title="Download JSON">
                 <Download size={16} />
@@ -168,34 +172,38 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
         <div className="w-[1px] bg-slate-200 dark:bg-slate-700 mx-1 my-1"></div>
 
         <div className="flex items-center gap-1">
-            <button 
-                onClick={handleSmartCompile} 
-                className={`p-2 rounded-lg transition-colors flex items-center gap-1.5 ${
-                    isCompilingGlobal 
-                        ? 'bg-slate-100 dark:bg-slate-800 text-blue-500 animate-pulse cursor-wait' 
-                        : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
-                }`}
-                title={isCompilingGlobal ? "Compiling..." : "Compile Active Packages"}
-                disabled={isCompilingGlobal}
-            >
-                {isCompilingGlobal ? <Loader2 size={16} className="animate-spin" /> : <Hammer size={16} />}
-                {isCompilingGlobal && (
-                    <span className="text-xs font-mono font-bold">{compilationProgress.current}/{compilationProgress.total}</span>
-                )}
-            </button>
+            {!readOnly && (
+                <>
+                    <button 
+                        onClick={handleSmartCompile} 
+                        className={`p-2 rounded-lg transition-colors flex items-center gap-1.5 ${
+                            isCompilingGlobal 
+                                ? 'bg-slate-100 dark:bg-slate-800 text-blue-500 animate-pulse cursor-wait' 
+                                : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                        }`}
+                        title={isCompilingGlobal ? "Compiling..." : "Compile Active Packages"}
+                        disabled={isCompilingGlobal}
+                    >
+                        {isCompilingGlobal ? <Loader2 size={16} className="animate-spin" /> : <Hammer size={16} />}
+                        {isCompilingGlobal && (
+                            <span className="text-xs font-mono font-bold">{compilationProgress.current}/{compilationProgress.total}</span>
+                        )}
+                    </button>
 
-            <button 
-                onClick={handleDeploy} 
-                disabled={isOffline}
-                className={`px-3 py-2 rounded-lg flex items-center gap-2 transition-colors text-xs font-bold ${
-                    isOffline
-                    ? 'bg-slate-100 dark:bg-slate-800 text-slate-400 cursor-not-allowed'
-                    : 'bg-blue-600 hover:bg-blue-700 text-white'
-                }`}
-                title="Deploy to Agent"
-            >
-                <UploadCloud size={14} /> Deploy
-            </button>
+                    <button 
+                        onClick={handleDeploy} 
+                        disabled={isOffline}
+                        className={`px-3 py-2 rounded-lg flex items-center gap-2 transition-colors text-xs font-bold ${
+                            isOffline
+                            ? 'bg-slate-100 dark:bg-slate-800 text-slate-400 cursor-not-allowed'
+                            : 'bg-blue-600 hover:bg-blue-700 text-white'
+                        }`}
+                        title="Deploy to Agent"
+                    >
+                        <UploadCloud size={14} /> Deploy
+                    </button>
+                </>
+            )}
         </div>
 
       </div>

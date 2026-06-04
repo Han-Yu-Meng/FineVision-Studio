@@ -50,8 +50,9 @@ const edgeTypes = {
 export const DataflowEditor: React.FC<{ 
   initialAgentId?: string, 
   hideSidebar?: boolean,
-  agent?: Agent 
-}> = ({ initialAgentId, hideSidebar = false, agent: propsAgent }) => {
+  agent?: Agent,
+  readOnly?: boolean
+}> = ({ initialAgentId, hideSidebar = false, agent: propsAgent, readOnly = false }) => {
   const { 
     agents, 
     dataflows,
@@ -826,6 +827,7 @@ export const DataflowEditor: React.FC<{
       editorSelectedAgentId, setNodes, setEdges, resetHistory, showToast]);
 
   const onConnect = useCallback((params: Connection) => {
+      if (readOnly) return;
       const sourceNode = getNode(params.source);
       const targetNode = getNode(params.target);
       if (!sourceNode || !targetNode) return;
@@ -878,6 +880,7 @@ export const DataflowEditor: React.FC<{
     }, [setEdges, setNodes, getNode, showToast]);
 
   const onNodesDelete = useCallback((deleted: Node[]) => {
+      if (readOnly) return;
       setEdges((eds) => eds.filter((edge) => !deleted.some((node) => node.id === edge.source || node.id === edge.target)));
       // If highlighted node is deleted, clear highlight
       if (deleted.some(n => n.id === highlightedNodeId)) {
@@ -890,7 +893,7 @@ export const DataflowEditor: React.FC<{
 
   // Auto-save logic: save current state immediately when changes are detected
   useEffect(() => {
-    if (!originalDataflow) return;
+    if (!originalDataflow || readOnly) return;
     
     const currentFlow = reactFlowToDataflow(nodes, edges, config);
     const originalJson = normalizeDataflow(originalDataflow);
@@ -927,9 +930,9 @@ export const DataflowEditor: React.FC<{
         }
       };
 
-      // Check if there's a working copy in localStorage
+      // Check if there's a working copy in localStorage (Skip if in readOnly mode)
       const workingKey = `dataflow_working_${normalizedDataflow.config.name}`;
-      const workingCopy = localStorage.getItem(workingKey);
+      const workingCopy = !readOnly ? localStorage.getItem(workingKey) : null;
       
       let dataflowToLoad = normalizedDataflow;
       if (workingCopy) {
@@ -1152,9 +1155,15 @@ export const DataflowEditor: React.FC<{
                     });
                     const recentLogs = filteredLogs.slice(-20);
                     
-                    // Update if metrics changed or logs count changed
+                    // Update if metrics changed or logs content changed
                     const metricsChanged = JSON.stringify(node.data.metrics) !== JSON.stringify(nodeMetric.metrics);
-                    const logsChanged = (node.data.logs?.length || 0) !== recentLogs.length;
+                    
+                    const oldLogs = node.data.logs || [];
+                    const lastOldLog = oldLogs[oldLogs.length - 1];
+                    const lastNewLog = recentLogs[recentLogs.length - 1];
+                    const logsChanged = oldLogs.length !== recentLogs.length || 
+                                       (lastOldLog?.timestamp !== lastNewLog?.timestamp) ||
+                                       (lastOldLog?.message !== lastNewLog?.message);
 
                     if (metricsChanged || logsChanged) {
                         changed = true;
@@ -1367,13 +1376,18 @@ export const DataflowEditor: React.FC<{
   };
 
   
-  const onDragOver = useCallback((event: React.DragEvent) => { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; }, []);
+  const onDragOver = useCallback((event: React.DragEvent) => { 
+    if (readOnly) return;
+    event.preventDefault(); 
+    event.dataTransfer.dropEffect = 'move'; 
+  }, [readOnly]);
   const onDrop = useCallback((event: React.DragEvent) => {
+      if (readOnly) return;
       event.preventDefault();
       const funcName = event.dataTransfer.getData('application/reactflow');
       if (typeof funcName === 'undefined' || !funcName) return;
       addNode(funcName, screenToFlowPosition({ x: event.clientX, y: event.clientY }));
-    }, [addNode, screenToFlowPosition]);
+    }, [addNode, screenToFlowPosition, readOnly]);
 
   const onLayout = useCallback(() => {
     const dagreGraph = new dagre.graphlib.Graph();
@@ -1489,6 +1503,7 @@ export const DataflowEditor: React.FC<{
               handleCompile={handleCompileDataflow}
               handleClearAgentState={handleClearAgentState}
               isDirty={isDirty} // Passed Prop
+              readOnly={readOnly}
             />
 
             <PerformanceOverlay selectedAgent={displayAgent} />

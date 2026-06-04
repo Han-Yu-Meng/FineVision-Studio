@@ -10,6 +10,13 @@ export const AgentDetails = () => {
     const navigate = useNavigate();
     const { agents, getAgentDataflow, loadDataflow, setAgentState, setEditorSelectedAgentId } = useSystem();
     const [isLoading, setIsLoading] = useState(true);
+    const [currentId, setCurrentId] = useState(id);
+
+    // 强制同步 isLoading 状态，确保切换 ID 时立即进入加载状态，避免旧图残留
+    if (id !== currentId) {
+        setCurrentId(id);
+        setIsLoading(true);
+    }
     
     // 从全局 agents 列表中找到当前 Agent
     const agent = agents.find(a => a.id === id);
@@ -21,14 +28,30 @@ export const AgentDetails = () => {
         
         const initAgentDetails = async () => {
             if (id && agent) {
+                setIsLoading(true);
                 // 设置当前选中的 Agent ID 供 DataflowEditor 使用
                 setEditorSelectedAgentId(id);
 
                 // 获取并加载 Agent 当前运行的 Dataflow
                 try {
-                    const flow = await getAgentDataflow(id);
+                    let flow = null;
+                    let retries = 0;
+                    const maxRetries = 3;
+                    
+                    // 增加重试逻辑，应对 Agent 列表与命令执行之间的短暂同步延迟
+                    while (!flow && retries < maxRetries) {
+                        flow = await getAgentDataflow(id);
+                        if (!flow) {
+                            retries++;
+                            await new Promise(resolve => setTimeout(resolve, 500));
+                        }
+                    }
+
                     if (flow) {
                         loadDataflow(flow);
+                    } else {
+                        // 如果重试后仍没有 flow，清空当前显示
+                        loadDataflow({ config: { name: id, description: '' }, nodes: [] });
                     }
                 } catch (e) {
                     console.error("Failed to load agent dataflow", e);
@@ -36,6 +59,7 @@ export const AgentDetails = () => {
                 
                 setIsLoading(false);
             } else if (id && agents.length > 0 && !agent) {
+                setIsLoading(true);
                 // 如果列表已加载但没找到该 agent，等待一会再标记加载完成（可能还在同步中）
                 timeout = setTimeout(() => {
                     setIsLoading(false);
@@ -70,50 +94,11 @@ export const AgentDetails = () => {
 
     return (
         <div className="h-full flex flex-col bg-slate-50 dark:bg-slate-950">
-            {/* Header: Simplified UI as before */}
-            <div className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-4 py-3 flex items-center justify-between shadow-sm z-10">
-                <div className="flex items-center gap-4">
-                    <button 
-                        onClick={() => navigate('/agents')}
-                        className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors text-slate-500"
-                    >
-                        <ArrowLeft size={20} />
-                    </button>
-                    <div>
-                        <div className="flex items-center gap-2">
-                            <h1 className="text-lg font-bold text-slate-900 dark:text-white">{id}</h1>
-                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
-                                isRunning ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
-                            }`}>
-                                {isRunning ? 'RUNNING' : 'ONLINE'}
-                            </span>
-                        </div>
-                        <div className="flex items-center gap-4 mt-0.5 text-xs text-slate-500">
-                            <div className="flex items-center gap-1">
-                                <Monitor size={12} />
-                                <span>PID: {pid || 'N/A'}</span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <div className="flex items-center gap-3">
-                    {isRunning && (
-                        <button 
-                            onClick={handleStop}
-                            className="flex items-center gap-2 bg-red-50 hover:bg-red-100 dark:bg-red-900/20 dark:hover:bg-red-900/30 text-red-600 dark:text-red-400 px-4 py-2 rounded-lg font-medium transition-colors border border-red-200 dark:border-red-900/50"
-                        >
-                            <StopCircle size={18} />
-                            Stop Agent
-                        </button>
-                    )}
-                </div>
-            </div>
 
             {/* Main Content: Reusing DataflowEditor with its internal subscription */}
             <div className="flex-1 overflow-hidden relative">
                 <ReactFlowProvider>
-                    <DataflowEditor initialAgentId={id} hideSidebar={true} />
+                    <DataflowEditor key={id} initialAgentId={id} hideSidebar={true} readOnly={true} />
                 </ReactFlowProvider>
             </div>
         </div>

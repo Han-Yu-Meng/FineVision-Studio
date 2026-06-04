@@ -176,6 +176,10 @@ export const SystemProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       }));
   }, [agentsRaw, localCapabilities, agentCapabilities]);
 
+  // Update ref during render to ensure child effects (like in AgentDetails)
+  // see the latest agents list when they call sendAgentCommand.
+  agentsRef.current = agents;
+
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
       const saved = localStorage.getItem('theme');
       return (saved as 'light' | 'dark') || 'dark';
@@ -198,10 +202,6 @@ export const SystemProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       if (theme === 'dark') document.documentElement.classList.add('dark');
       else document.documentElement.classList.remove('dark');
   }, []);
-
-  useEffect(() => {
-    agentsRef.current = agents;
-  }, [agents]);
 
   const [dataflows, setDataflows] = useState<Dataflow[]>([]);
   const [activeDataflow, setActiveDataflow] = useState<Dataflow | null>(null);
