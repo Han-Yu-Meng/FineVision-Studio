@@ -419,13 +419,10 @@ export default defineConfig(({ mode }) => {
       },
       plugins: [react(), ViteYaml(), Studio()],
       build: {
-        minify: 'terser',
-        terserOptions: {
-          compress: {
-            drop_console: true,
-            drop_debugger: true
-          }
-        }
+        minify: 'esbuild',
+      },
+      esbuild: {
+        drop: mode === 'production' ? ['console', 'debugger'] : [],
       },
       define: { },
       resolve: {
