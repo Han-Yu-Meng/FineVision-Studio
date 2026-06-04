@@ -230,9 +230,17 @@ export const reactFlowToDataflow = (nodes: Node[], edges: Edge[], config: any): 
 
 export const normalizeDataflow = (flow: Dataflow) => {
     if (!flow) return "";
-    const sortedNodes = [...flow.nodes].sort((a, b) => a.id.localeCompare(b.id));
+    
+    // Handle flat structure where config might be missing
+    const config = flow.config || { 
+        name: (flow as any).name || 'untitled', 
+        description: (flow as any).description || '' 
+    };
+    
+    const sortedNodes = [...(flow.nodes || [])].sort((a, b) => (a.id || "").localeCompare(b.id || ""));
     
     const normalizedNodes = sortedNodes.map(n => {
+        if (!n) return null;
         const sortedInputs: Record<string, any> = {};
         Object.keys(n.inputs || {}).sort().forEach(k => {
             sortedInputs[k] = n.inputs[k];
@@ -253,13 +261,13 @@ export const normalizeDataflow = (flow: Dataflow) => {
             servers: servers,
             actors: actors,
             commanders: commanders,
-            position: { x: Math.round(n.position.x), y: Math.round(n.position.y) },
+            position: { x: Math.round(n.position?.x || 0), y: Math.round(n.position?.y || 0) },
             connects: Object.values(n.inputs || {}).map((i: any) => i.connect).filter(Boolean).sort() 
         };
-    });
+    }).filter(Boolean);
     
     return JSON.stringify({
-        config: flow.config,
+        config,
         nodes: normalizedNodes
     });
 };

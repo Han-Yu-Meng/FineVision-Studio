@@ -103,6 +103,9 @@ export interface Agent {
   status: AgentStatus;
   lastSeen: number;
   url: string;
+  agent_ip?: string;
+  agent_port?: number;
+  pid?: number;
   capabilities: AgentCapabilities;
   metrics: SystemMetrics;
   nodeMetrics: NodeMetrics;

@@ -47,7 +47,7 @@ const edgeTypes = {
   default: CustomEdge,
 };
 
-const EditorContent: React.FC = () => {
+export const DataflowEditor: React.FC<{ initialAgentId?: string, hideSidebar?: boolean }> = ({ initialAgentId, hideSidebar = false }) => {
   const { 
     agents, 
     dataflows,
@@ -76,8 +76,9 @@ const EditorContent: React.FC = () => {
   // 根据 URL 参数加载对应的 Dataflow
   useEffect(() => {
     if (urlParamName && dataflows.length > 0) {
-      if (!activeDataflow || activeDataflow.config.name !== urlParamName) {
-        const targetFlow = dataflows.find(f => f.config.name === urlParamName);
+      const activeName = activeDataflow?.config?.name || (activeDataflow as any)?.name;
+      if (!activeDataflow || activeName !== urlParamName) {
+        const targetFlow = dataflows.find(f => (f.config?.name || (f as any).name) === urlParamName);
         if (targetFlow) {
           loadDataflow(targetFlow);
         }
@@ -96,10 +97,12 @@ const EditorContent: React.FC = () => {
   const [highlightedNodeId, setHighlightedNodeId] = useState<string | null>(null);
 
   useEffect(() => {
-      if (!editorSelectedAgentId && agents.length > 0) {
+      if (initialAgentId) {
+          setEditorSelectedAgentId(initialAgentId);
+      } else if (!editorSelectedAgentId && agents.length > 0) {
           setEditorSelectedAgentId(agents[0].id);
       }
-  }, [agents, editorSelectedAgentId, setEditorSelectedAgentId]);
+  }, [agents, editorSelectedAgentId, setEditorSelectedAgentId, initialAgentId]);
 
   const realtimeAgent = useAgentMetrics(editorSelectedAgentId);
 
@@ -803,11 +806,12 @@ const EditorContent: React.FC = () => {
       }));
       setNodes(hydratedNodes);
       setEdges(rfData.edges);
-      setConfig(originalDataflow.config);
+      setConfig(originalDataflow.config || { name: (originalDataflow as any).name || 'untitled', description: (originalDataflow as any).description || '' });
       setAutoSavedDataflow(null); // Clear auto-save
       setIsDirty(false);
       // Clear working copy from localStorage
-      const workingKey = `dataflow_working_${originalDataflow.config.name}`;
+      const flowName = originalDataflow.config?.name || (originalDataflow as any).name || 'untitled';
+      const workingKey = `dataflow_working_${flowName}`;
       localStorage.removeItem(workingKey);
       resetHistory(hydratedNodes, rfData.edges);
       showToast('Reverted to saved version.', 'info');
@@ -908,15 +912,27 @@ const EditorContent: React.FC = () => {
   // --- Data Loading ---
   useEffect(() => {
     if (activeDataflow) {
+      // Normalize dataflow if config is missing (handle flat structure)
+      const normalizedDataflow = {
+        ...activeDataflow,
+        config: activeDataflow.config || { 
+          name: (activeDataflow as any).name || 'untitled', 
+          description: (activeDataflow as any).description || '' 
+        }
+      };
+
       // Check if there's a working copy in localStorage
-      const workingKey = `dataflow_working_${activeDataflow.config.name}`;
+      const workingKey = `dataflow_working_${normalizedDataflow.config.name}`;
       const workingCopy = localStorage.getItem(workingKey);
       
-      let dataflowToLoad = activeDataflow;
+      let dataflowToLoad = normalizedDataflow;
       if (workingCopy) {
         try {
           const parsedWorking = JSON.parse(workingCopy);
-          dataflowToLoad = parsedWorking;
+          dataflowToLoad = {
+            ...parsedWorking,
+            config: parsedWorking.config || normalizedDataflow.config
+          };
         } catch (e) {
           console.warn('[Editor] Failed to parse working copy, using saved version');
         }
@@ -924,25 +940,98 @@ const EditorContent: React.FC = () => {
       
       setConfig(dataflowToLoad.config);
       const rfData = dataflowToReactFlow(dataflowToLoad, allCapabilities);
-      const hydratedNodes = rfData.nodes.map(n => ({
-          ...n,
-          data: { 
-            ...n.data, 
-            onParameterChange: handleParameterChange, 
-            onClientChange: handleClientChange,
-            onServerChange: handleServerChange,
-            onActorChange: handleActorChange,
-            onCommanderChange: handleCommanderChange,
-            onIdChange: handleIdChange, 
-            onCollapseChange: handleCollapseChange,
-            onVersionChange: handleVersionChange,
-            agentId: editorSelectedAgentId
-          }
-      }));
+      let hydratedNodes = rfData.nodes.map(n => {
+          const data = n.data as any;
+          const parameterCount = data.parameterDefs?.length || 0;
+          // 如果参数大于 2 个，且没有明确指定不折叠，则默认折叠
+          const shouldCollapse = parameterCount > 2;
+          
+          return {
+            ...n,
+            data: { 
+              ...data, 
+              collapsed: data.collapsed !== undefined ? data.collapsed : shouldCollapse,
+              onParameterChange: handleParameterChange, 
+              onClientChange: handleClientChange,
+              onServerChange: handleServerChange,
+              onActorChange: handleActorChange,
+              onCommanderChange: handleCommanderChange,
+              onIdChange: handleIdChange, 
+              onCollapseChange: handleCollapseChange,
+              onVersionChange: handleVersionChange,
+              agentId: editorSelectedAgentId
+            }
+          };
+      });
+
+      // 自动布局检查：如果所有节点都在 (0,0) 或位置缺失，则调用自动排布
+      const needsLayout = hydratedNodes.length > 0 && hydratedNodes.every(n => n.position.x === 0 && n.position.y === 0);
+      if (needsLayout) {
+          const dagreGraph = new dagre.graphlib.Graph();
+          dagreGraph.setDefaultEdgeLabel(() => ({}));
+          
+          const DEFAULT_WIDTH = 300;
+          const DEFAULT_HEIGHT = 200;
+          const COLLAPSED_HEIGHT = 60;
+
+          dagreGraph.setGraph({ 
+              rankdir: 'LR', 
+              nodesep: 100, // 初始加载时使用更大的间距以确保不重叠
+              ranksep: 150 
+          });
+          
+          hydratedNodes.forEach((node) => {
+              // 初始加载时没有测量高度，根据数据项数量估算高度
+              const data = node.data as any;
+              let estimatedHeight = COLLAPSED_HEIGHT;
+              
+              if (!data.collapsed) {
+                const rowCount = Math.max(
+                    (data.inputs?.length || 0),
+                    (data.outputs?.length || 0),
+                    (data.parameterDefs?.length || 0)
+                );
+                estimatedHeight = Math.max(DEFAULT_HEIGHT, 100 + rowCount * 30);
+              }
+              
+              dagreGraph.setNode(node.id, { width: DEFAULT_WIDTH, height: estimatedHeight });
+          });
+          rfData.edges.forEach((edge) => {
+              dagreGraph.setEdge(edge.source, edge.target);
+          });
+          
+          dagre.layout(dagreGraph);
+          
+          hydratedNodes = hydratedNodes.map((node) => {
+              const nodeWithPosition = dagreGraph.node(node.id);
+              // 获取对应的估算高度以计算中心偏置
+              const data = node.data as any;
+              let estimatedHeight = COLLAPSED_HEIGHT;
+              
+              if (!data.collapsed) {
+                const rowCount = Math.max(
+                    (data.inputs?.length || 0),
+                    (data.outputs?.length || 0),
+                    (data.parameterDefs?.length || 0)
+                );
+                estimatedHeight = Math.max(DEFAULT_HEIGHT, 100 + rowCount * 30);
+              }
+
+              return { 
+                  ...node, 
+                  position: { 
+                      x: nodeWithPosition.x - DEFAULT_WIDTH / 2, 
+                      y: nodeWithPosition.y - estimatedHeight / 2 
+                  } 
+              };
+          });
+      }
+
       setNodes(hydratedNodes);
       setEdges(rfData.edges);
       // originalDataflow is always the saved version (not working copy)
-      setOriginalDataflow(activeDataflow);
+      // Ensure originalDataflow has the same normalized config as dataflowToLoad
+      setOriginalDataflow(normalizedDataflow);
       resetHistory(hydratedNodes, rfData.edges);
       setHighlightedNodeId(null); // Reset selection on load
       setTimeout(() => fitView({ padding: 0.2, duration: 0 }), 100);
@@ -1208,16 +1297,54 @@ const EditorContent: React.FC = () => {
   const onLayout = useCallback(() => {
     const dagreGraph = new dagre.graphlib.Graph();
     dagreGraph.setDefaultEdgeLabel(() => ({}));
-    const nodeWidth = 300;
-    const nodeHeight = 150;
-    dagreGraph.setGraph({ rankdir: 'LR' });
-    nodes.forEach((node) => dagreGraph.setNode(node.id, { width: nodeWidth, height: nodeHeight }));
+    
+    // 默认节点尺寸，如果无法获取测量尺寸则使用
+    const DEFAULT_WIDTH = 300;
+    const DEFAULT_HEIGHT = 200;
+
+    dagreGraph.setGraph({ 
+        rankdir: 'LR', 
+        nodesep: 80, // 增加节点间的纵向间距
+        ranksep: 120 // 增加层级间的横向间距
+    });
+
+    nodes.forEach((node) => {
+        // 优先使用 ReactFlow 测量出的实际尺寸，如果没有（比如刚加载还没渲染）则使用估算尺寸
+        const width = node.measured?.width ?? DEFAULT_WIDTH;
+        let height = node.measured?.height ?? DEFAULT_HEIGHT;
+        
+        // 如果没有测量高度，尝试根据数据量简单估算一个高度
+        if (!node.measured?.height) {
+            const data = node.data as any;
+            const rowCount = Math.max(
+                (data.inputs?.length || 0),
+                (data.outputs?.length || 0),
+                (data.parameterDefs?.length || 0)
+            );
+            height = Math.max(DEFAULT_HEIGHT, 100 + rowCount * 30);
+        }
+
+        dagreGraph.setNode(node.id, { width, height });
+    });
+
     edges.forEach((edge) => dagreGraph.setEdge(edge.source, edge.target));
+    
     dagre.layout(dagreGraph);
+
     const layoutedNodes = nodes.map((node) => {
       const nodeWithPosition = dagreGraph.node(node.id);
-      return { ...node, position: { x: nodeWithPosition.x - nodeWidth / 2, y: nodeWithPosition.y - nodeHeight / 2 } };
+      const width = node.measured?.width ?? DEFAULT_WIDTH;
+      const height = node.measured?.height ?? DEFAULT_HEIGHT;
+
+      return { 
+          ...node, 
+          position: { 
+              x: nodeWithPosition.x - width / 2, 
+              y: nodeWithPosition.y - height / 2 
+          } 
+      };
     });
+
     setNodes(layoutedNodes);
     setTimeout(() => fitView({ duration: 800 }), 10);
   }, [nodes, edges, setNodes, fitView]);
@@ -1256,17 +1383,19 @@ const EditorContent: React.FC = () => {
   return (
     <div className="flex h-full relative">
         {/* Sidebar */}
-        <EditorSidebar 
-          key={sidebarKey}
-          config={config} setConfig={setConfig} isDirty={isDirty}
-          agents={agents} 
-          selectedAgentId={editorSelectedAgentId} 
-          setSelectedAgentId={setEditorSelectedAgentId}
-          groupedCapabilities={groupedCapabilities} 
-          expandedCategories={expandedCategories}
-          toggleCategory={(cat) => setExpandedCategories(p => ({...p, [cat]: !p[cat]}))}
-          isSidebarCollapsed={false}
-        />
+        {!hideSidebar && (
+            <EditorSidebar 
+              key={sidebarKey}
+              config={config} setConfig={setConfig} isDirty={isDirty}
+              agents={agents} 
+              selectedAgentId={editorSelectedAgentId} 
+              setSelectedAgentId={setEditorSelectedAgentId}
+              groupedCapabilities={groupedCapabilities} 
+              expandedCategories={expandedCategories}
+              toggleCategory={(cat) => setExpandedCategories(p => ({...p, [cat]: !p[cat]}))}
+              isSidebarCollapsed={false}
+            />
+        )}
 
         {/* Canvas Area */}
         <div className="flex-1 h-full relative" onDrop={onDrop} onDragOver={onDragOver}>
@@ -1331,7 +1460,7 @@ const EditorContent: React.FC = () => {
 export const Editor: React.FC = () => {
   return (
     <ReactFlowProvider>
-      <EditorContent />
+      <DataflowEditor />
     </ReactFlowProvider>
   );
 };

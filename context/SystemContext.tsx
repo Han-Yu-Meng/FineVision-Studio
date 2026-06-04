@@ -4,7 +4,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Agent, AgentStatus, Dataflow, SystemMetrics, NodeMetrics, PipeMetric, PipeMetricSample, Capability, AgentCapabilities, ParameterDef, PortDef, LogEntry } from '../types';
 import { InspectResult, InspectNode } from '../types_pkg';
-import { MOCK_AGENT } from '../services/mockData';
 import { mergeCapabilities } from '../utils/dataflowUtils';
 // @ts-ignore
 import dataflowJson from '../dataflows.json';
@@ -932,8 +931,9 @@ export const SystemProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const saveDataflow = useCallback(async (flow: Dataflow) => {
     try {
         await packageService.saveDataflow(flow);
+        const flowName = flow.config?.name || (flow as any).name;
         setDataflows(prev => {
-          const idx = prev.findIndex(f => f.config.name === flow.config.name);
+          const idx = prev.findIndex(f => (f.config?.name || (f as any).name) === flowName);
           if (idx >= 0) {
             const copy = [...prev];
             copy[idx] = flow;
@@ -941,7 +941,8 @@ export const SystemProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           }
           return [...prev, flow];
         });
-        if (activeDataflow?.config.name === flow.config.name) {
+        const activeName = activeDataflow?.config?.name || (activeDataflow as any)?.name;
+        if (activeName === flowName) {
             setActiveDataflow(flow);
         }
     } catch (e) {
@@ -961,8 +962,9 @@ export const SystemProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const deleteDataflow = useCallback(async (name: string) => {
     try {
         await packageService.deleteDataflow(name);
-        setDataflows(prev => prev.filter(f => f.config.name !== name));
-        if (activeDataflow?.config.name === name) setActiveDataflow(null);
+        setDataflows(prev => prev.filter(f => (f.config?.name || (f as any).name) !== name));
+        const activeName = activeDataflow?.config?.name || (activeDataflow as any)?.name;
+        if (activeName === name) setActiveDataflow(null);
     } catch (e) {
         console.error("Failed to delete dataflow from backend:", e);
         addNotification({ message: "Failed to delete dataflow", type: 'error' });
